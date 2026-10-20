@@ -400,6 +400,22 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -536,6 +552,8 @@ fileprivate struct FfiConverterString: FfiConverter {
  */
 public protocol DoogatDriverProtocol: AnyObject, Sendable {
     
+    func applySchema(schemaDoc: String, dryRun: Bool, allowDestructive: Bool) throws  -> SchemaApplyReportRecord
+    
     func attachFile(doogatId: String, filePath: String) throws  -> AttachmentInfo
     
     func beginTransaction() throws 
@@ -544,7 +562,12 @@ public protocol DoogatDriverProtocol: AnyObject, Sendable {
     
     func compact() throws 
     
-    func createDoogat(content: String, message: String) throws  -> String
+    /**
+     * Create a doogat from structured input, routed through the app contract.
+     * An unregistered `doogat_type` yields a base-only create with an
+     * `UNREGISTERED_TYPE_BASE_ONLY` warning.
+     */
+    func createStructured(title: String?, tags: [String], doogatType: String?, body: String?, fields: [FieldEntryValue], onConflict: ConflictActionRecord) throws  -> CreateResultRecord
     
     func deleteDoogat(id: String, message: String) throws 
     
@@ -576,9 +599,16 @@ public protocol DoogatDriverProtocol: AnyObject, Sendable {
     
     func search(query: String) throws  -> [SearchResult]
     
+    func searchFiltered(query: String, limit: UInt32?, offset: UInt32?, types: [String]?, tag: String?) throws  -> PaginatedSearchResult
+    
     func searchPaginated(query: String, limit: UInt32, offset: UInt32) throws  -> PaginatedSearchResult
     
-    func updateDoogat(id: String, content: String, message: String) throws 
+    /**
+     * Update a doogat from structured input, routed through the app contract.
+     * A `None` field of `input` leaves the stored value unchanged;
+     * `input.unset_fields` removes frontmatter keys.
+     */
+    func updateStructured(id: String, input: UpdateStructuredInput) throws  -> UpdateResultRecord
     
 }
 /**
@@ -660,6 +690,16 @@ public static func createRepo(repoPath: String)throws  -> DoogatDriver  {
     
 
     
+open func applySchema(schemaDoc: String, dryRun: Bool, allowDestructive: Bool)throws  -> SchemaApplyReportRecord  {
+    return try  FfiConverterTypeSchemaApplyReportRecord_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_apply_schema(self.uniffiClonePointer(),
+        FfiConverterString.lower(schemaDoc),
+        FfiConverterBool.lower(dryRun),
+        FfiConverterBool.lower(allowDestructive),$0
+    )
+})
+}
+    
 open func attachFile(doogatId: String, filePath: String)throws  -> AttachmentInfo  {
     return try  FfiConverterTypeAttachmentInfo_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
     uniffi_ddb_core_fn_method_doogatdriver_attach_file(self.uniffiClonePointer(),
@@ -687,11 +727,20 @@ open func compact()throws   {try rustCallWithError(FfiConverterTypeDdbError_lift
 }
 }
     
-open func createDoogat(content: String, message: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
-    uniffi_ddb_core_fn_method_doogatdriver_create_doogat(self.uniffiClonePointer(),
-        FfiConverterString.lower(content),
-        FfiConverterString.lower(message),$0
+    /**
+     * Create a doogat from structured input, routed through the app contract.
+     * An unregistered `doogat_type` yields a base-only create with an
+     * `UNREGISTERED_TYPE_BASE_ONLY` warning.
+     */
+open func createStructured(title: String?, tags: [String], doogatType: String?, body: String?, fields: [FieldEntryValue], onConflict: ConflictActionRecord)throws  -> CreateResultRecord  {
+    return try  FfiConverterTypeCreateResultRecord_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_create_structured(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(title),
+        FfiConverterSequenceString.lower(tags),
+        FfiConverterOptionString.lower(doogatType),
+        FfiConverterOptionString.lower(body),
+        FfiConverterSequenceTypeFieldEntryValue.lower(fields),
+        FfiConverterTypeConflictActionRecord_lower(onConflict),$0
     )
 })
 }
@@ -810,6 +859,18 @@ open func search(query: String)throws  -> [SearchResult]  {
 })
 }
     
+open func searchFiltered(query: String, limit: UInt32?, offset: UInt32?, types: [String]?, tag: String?)throws  -> PaginatedSearchResult  {
+    return try  FfiConverterTypePaginatedSearchResult_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_search_filtered(self.uniffiClonePointer(),
+        FfiConverterString.lower(query),
+        FfiConverterOptionUInt32.lower(limit),
+        FfiConverterOptionUInt32.lower(offset),
+        FfiConverterOptionSequenceString.lower(types),
+        FfiConverterOptionString.lower(tag),$0
+    )
+})
+}
+    
 open func searchPaginated(query: String, limit: UInt32, offset: UInt32)throws  -> PaginatedSearchResult  {
     return try  FfiConverterTypePaginatedSearchResult_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
     uniffi_ddb_core_fn_method_doogatdriver_search_paginated(self.uniffiClonePointer(),
@@ -820,13 +881,18 @@ open func searchPaginated(query: String, limit: UInt32, offset: UInt32)throws  -
 })
 }
     
-open func updateDoogat(id: String, content: String, message: String)throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
-    uniffi_ddb_core_fn_method_doogatdriver_update_doogat(self.uniffiClonePointer(),
+    /**
+     * Update a doogat from structured input, routed through the app contract.
+     * A `None` field of `input` leaves the stored value unchanged;
+     * `input.unset_fields` removes frontmatter keys.
+     */
+open func updateStructured(id: String, input: UpdateStructuredInput)throws  -> UpdateResultRecord  {
+    return try  FfiConverterTypeUpdateResultRecord_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_update_structured(self.uniffiClonePointer(),
         FfiConverterString.lower(id),
-        FfiConverterString.lower(content),
-        FfiConverterString.lower(message),$0
+        FfiConverterTypeUpdateStructuredInput_lower(input),$0
     )
-}
+})
 }
     
 
@@ -982,14 +1048,16 @@ public struct ColumnDefRecord {
     public var dataType: String
     public var references: String?
     public var required: Bool
+    public var zone: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(name: String, dataType: String, references: String?, required: Bool) {
+    public init(name: String, dataType: String, references: String?, required: Bool, zone: String?) {
         self.name = name
         self.dataType = dataType
         self.references = references
         self.required = required
+        self.zone = zone
     }
 }
 
@@ -1012,6 +1080,9 @@ extension ColumnDefRecord: Equatable, Hashable {
         if lhs.required != rhs.required {
             return false
         }
+        if lhs.zone != rhs.zone {
+            return false
+        }
         return true
     }
 
@@ -1020,6 +1091,7 @@ extension ColumnDefRecord: Equatable, Hashable {
         hasher.combine(dataType)
         hasher.combine(references)
         hasher.combine(required)
+        hasher.combine(zone)
     }
 }
 
@@ -1035,7 +1107,8 @@ public struct FfiConverterTypeColumnDefRecord: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 dataType: FfiConverterString.read(from: &buf), 
                 references: FfiConverterOptionString.read(from: &buf), 
-                required: FfiConverterBool.read(from: &buf)
+                required: FfiConverterBool.read(from: &buf), 
+                zone: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1044,6 +1117,7 @@ public struct FfiConverterTypeColumnDefRecord: FfiConverterRustBuffer {
         FfiConverterString.write(value.dataType, into: &buf)
         FfiConverterOptionString.write(value.references, into: &buf)
         FfiConverterBool.write(value.required, into: &buf)
+        FfiConverterOptionString.write(value.zone, into: &buf)
     }
 }
 
@@ -1064,17 +1138,497 @@ public func FfiConverterTypeColumnDefRecord_lower(_ value: ColumnDefRecord) -> R
 
 
 /**
+ * FFI-safe create result, a lossless-for-the-named-fields mirror of the
+ * core [`ParsedDoogat`] payload (PRD 00177): an id-only create must not
+ * drop required result fields. `extra` still degrades nested lists/maps
+ * per [`core_to_field_value`]'s documented contract.
+ */
+public struct CreateResultRecord {
+    public var id: String
+    public var title: String?
+    public var doogatType: String?
+    public var tags: [String]
+    public var path: String
+    public var body: String
+    public var date: String?
+    public var extra: [FieldEntryValue]
+    public var sections: [SectionRecord]
+    public var links: [LinkRecord]
+    public var updatedAt: String?
+    public var warnings: [RebuildWarningRecord]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, title: String?, doogatType: String?, tags: [String], path: String, body: String, date: String?, extra: [FieldEntryValue], sections: [SectionRecord], links: [LinkRecord], updatedAt: String?, warnings: [RebuildWarningRecord]) {
+        self.id = id
+        self.title = title
+        self.doogatType = doogatType
+        self.tags = tags
+        self.path = path
+        self.body = body
+        self.date = date
+        self.extra = extra
+        self.sections = sections
+        self.links = links
+        self.updatedAt = updatedAt
+        self.warnings = warnings
+    }
+}
+
+#if compiler(>=6)
+extension CreateResultRecord: Sendable {}
+#endif
+
+
+extension CreateResultRecord: Equatable, Hashable {
+    public static func ==(lhs: CreateResultRecord, rhs: CreateResultRecord) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.doogatType != rhs.doogatType {
+            return false
+        }
+        if lhs.tags != rhs.tags {
+            return false
+        }
+        if lhs.path != rhs.path {
+            return false
+        }
+        if lhs.body != rhs.body {
+            return false
+        }
+        if lhs.date != rhs.date {
+            return false
+        }
+        if lhs.extra != rhs.extra {
+            return false
+        }
+        if lhs.sections != rhs.sections {
+            return false
+        }
+        if lhs.links != rhs.links {
+            return false
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return false
+        }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(doogatType)
+        hasher.combine(tags)
+        hasher.combine(path)
+        hasher.combine(body)
+        hasher.combine(date)
+        hasher.combine(extra)
+        hasher.combine(sections)
+        hasher.combine(links)
+        hasher.combine(updatedAt)
+        hasher.combine(warnings)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreateResultRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreateResultRecord {
+        return
+            try CreateResultRecord(
+                id: FfiConverterString.read(from: &buf), 
+                title: FfiConverterOptionString.read(from: &buf), 
+                doogatType: FfiConverterOptionString.read(from: &buf), 
+                tags: FfiConverterSequenceString.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf), 
+                body: FfiConverterString.read(from: &buf), 
+                date: FfiConverterOptionString.read(from: &buf), 
+                extra: FfiConverterSequenceTypeFieldEntryValue.read(from: &buf), 
+                sections: FfiConverterSequenceTypeSectionRecord.read(from: &buf), 
+                links: FfiConverterSequenceTypeLinkRecord.read(from: &buf), 
+                updatedAt: FfiConverterOptionString.read(from: &buf), 
+                warnings: FfiConverterSequenceTypeRebuildWarningRecord.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CreateResultRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.doogatType, into: &buf)
+        FfiConverterSequenceString.write(value.tags, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterString.write(value.body, into: &buf)
+        FfiConverterOptionString.write(value.date, into: &buf)
+        FfiConverterSequenceTypeFieldEntryValue.write(value.extra, into: &buf)
+        FfiConverterSequenceTypeSectionRecord.write(value.sections, into: &buf)
+        FfiConverterSequenceTypeLinkRecord.write(value.links, into: &buf)
+        FfiConverterOptionString.write(value.updatedAt, into: &buf)
+        FfiConverterSequenceTypeRebuildWarningRecord.write(value.warnings, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateResultRecord_lift(_ buf: RustBuffer) throws -> CreateResultRecord {
+    return try FfiConverterTypeCreateResultRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateResultRecord_lower(_ value: CreateResultRecord) -> RustBuffer {
+    return FfiConverterTypeCreateResultRecord.lower(value)
+}
+
+
+public struct DdbErrorContextEntry {
+    public var key: String
+    public var value: String?
+    public var values: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, value: String?, values: [String]) {
+        self.key = key
+        self.value = value
+        self.values = values
+    }
+}
+
+#if compiler(>=6)
+extension DdbErrorContextEntry: Sendable {}
+#endif
+
+
+extension DdbErrorContextEntry: Equatable, Hashable {
+    public static func ==(lhs: DdbErrorContextEntry, rhs: DdbErrorContextEntry) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        if lhs.values != rhs.values {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(value)
+        hasher.combine(values)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDdbErrorContextEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DdbErrorContextEntry {
+        return
+            try DdbErrorContextEntry(
+                key: FfiConverterString.read(from: &buf), 
+                value: FfiConverterOptionString.read(from: &buf), 
+                values: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DdbErrorContextEntry, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterOptionString.write(value.value, into: &buf)
+        FfiConverterSequenceString.write(value.values, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDdbErrorContextEntry_lift(_ buf: RustBuffer) throws -> DdbErrorContextEntry {
+    return try FfiConverterTypeDdbErrorContextEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDdbErrorContextEntry_lower(_ value: DdbErrorContextEntry) -> RustBuffer {
+    return FfiConverterTypeDdbErrorContextEntry.lower(value)
+}
+
+
+/**
+ * FFI-safe frontmatter field entry (one key/value pair of a search hit).
+ */
+public struct FieldEntry {
+    public var key: String
+    public var value: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, value: String) {
+        self.key = key
+        self.value = value
+    }
+}
+
+#if compiler(>=6)
+extension FieldEntry: Sendable {}
+#endif
+
+
+extension FieldEntry: Equatable, Hashable {
+    public static func ==(lhs: FieldEntry, rhs: FieldEntry) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(value)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFieldEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FieldEntry {
+        return
+            try FieldEntry(
+                key: FfiConverterString.read(from: &buf), 
+                value: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FieldEntry, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterString.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldEntry_lift(_ buf: RustBuffer) throws -> FieldEntry {
+    return try FfiConverterTypeFieldEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldEntry_lower(_ value: FieldEntry) -> RustBuffer {
+    return FfiConverterTypeFieldEntry.lower(value)
+}
+
+
+/**
+ * FFI-safe frontmatter field input. A `Vec` of these stands in for a map
+ * because UniFFI records need a concrete field order.
+ */
+public struct FieldEntryValue {
+    public var key: String
+    public var value: FieldValue
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, value: FieldValue) {
+        self.key = key
+        self.value = value
+    }
+}
+
+#if compiler(>=6)
+extension FieldEntryValue: Sendable {}
+#endif
+
+
+extension FieldEntryValue: Equatable, Hashable {
+    public static func ==(lhs: FieldEntryValue, rhs: FieldEntryValue) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(value)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFieldEntryValue: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FieldEntryValue {
+        return
+            try FieldEntryValue(
+                key: FfiConverterString.read(from: &buf), 
+                value: FfiConverterTypeFieldValue.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FieldEntryValue, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterTypeFieldValue.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldEntryValue_lift(_ buf: RustBuffer) throws -> FieldEntryValue {
+    return try FfiConverterTypeFieldEntryValue.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldEntryValue_lower(_ value: FieldEntryValue) -> RustBuffer {
+    return FfiConverterTypeFieldEntryValue.lower(value)
+}
+
+
+/**
+ * FFI-safe mirror of [`Link`].
+ */
+public struct LinkRecord {
+    public var target: String
+    public var display: String?
+    public var section: String?
+    public var kind: LinkKindRecord
+    public var zone: ZoneRecord
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(target: String, display: String?, section: String?, kind: LinkKindRecord, zone: ZoneRecord) {
+        self.target = target
+        self.display = display
+        self.section = section
+        self.kind = kind
+        self.zone = zone
+    }
+}
+
+#if compiler(>=6)
+extension LinkRecord: Sendable {}
+#endif
+
+
+extension LinkRecord: Equatable, Hashable {
+    public static func ==(lhs: LinkRecord, rhs: LinkRecord) -> Bool {
+        if lhs.target != rhs.target {
+            return false
+        }
+        if lhs.display != rhs.display {
+            return false
+        }
+        if lhs.section != rhs.section {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.zone != rhs.zone {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(target)
+        hasher.combine(display)
+        hasher.combine(section)
+        hasher.combine(kind)
+        hasher.combine(zone)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLinkRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LinkRecord {
+        return
+            try LinkRecord(
+                target: FfiConverterString.read(from: &buf), 
+                display: FfiConverterOptionString.read(from: &buf), 
+                section: FfiConverterOptionString.read(from: &buf), 
+                kind: FfiConverterTypeLinkKindRecord.read(from: &buf), 
+                zone: FfiConverterTypeZoneRecord.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LinkRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.target, into: &buf)
+        FfiConverterOptionString.write(value.display, into: &buf)
+        FfiConverterOptionString.write(value.section, into: &buf)
+        FfiConverterTypeLinkKindRecord.write(value.kind, into: &buf)
+        FfiConverterTypeZoneRecord.write(value.zone, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkRecord_lift(_ buf: RustBuffer) throws -> LinkRecord {
+    return try FfiConverterTypeLinkRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkRecord_lower(_ value: LinkRecord) -> RustBuffer {
+    return FfiConverterTypeLinkRecord.lower(value)
+}
+
+
+/**
  * FFI-safe paginated search result.
  */
 public struct PaginatedSearchResult {
     public var hits: [SearchResult]
     public var totalCount: UInt64
+    public var warnings: [RebuildWarningRecord]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(hits: [SearchResult], totalCount: UInt64) {
+    public init(hits: [SearchResult], totalCount: UInt64, warnings: [RebuildWarningRecord]) {
         self.hits = hits
         self.totalCount = totalCount
+        self.warnings = warnings
     }
 }
 
@@ -1091,12 +1645,16 @@ extension PaginatedSearchResult: Equatable, Hashable {
         if lhs.totalCount != rhs.totalCount {
             return false
         }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(hits)
         hasher.combine(totalCount)
+        hasher.combine(warnings)
     }
 }
 
@@ -1110,13 +1668,15 @@ public struct FfiConverterTypePaginatedSearchResult: FfiConverterRustBuffer {
         return
             try PaginatedSearchResult(
                 hits: FfiConverterSequenceTypeSearchResult.read(from: &buf), 
-                totalCount: FfiConverterUInt64.read(from: &buf)
+                totalCount: FfiConverterUInt64.read(from: &buf), 
+                warnings: FfiConverterSequenceTypeRebuildWarningRecord.read(from: &buf)
         )
     }
 
     public static func write(_ value: PaginatedSearchResult, into buf: inout [UInt8]) {
         FfiConverterSequenceTypeSearchResult.write(value.hits, into: &buf)
         FfiConverterUInt64.write(value.totalCount, into: &buf)
+        FfiConverterSequenceTypeRebuildWarningRecord.write(value.warnings, into: &buf)
     }
 }
 
@@ -1143,13 +1703,15 @@ public struct RebuildReport {
     public var indexed: UInt64
     public var tablesMaterialized: UInt64
     public var typesInferred: [String]
+    public var warnings: [RebuildWarningRecord]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(indexed: UInt64, tablesMaterialized: UInt64, typesInferred: [String]) {
+    public init(indexed: UInt64, tablesMaterialized: UInt64, typesInferred: [String], warnings: [RebuildWarningRecord]) {
         self.indexed = indexed
         self.tablesMaterialized = tablesMaterialized
         self.typesInferred = typesInferred
+        self.warnings = warnings
     }
 }
 
@@ -1169,6 +1731,9 @@ extension RebuildReport: Equatable, Hashable {
         if lhs.typesInferred != rhs.typesInferred {
             return false
         }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
         return true
     }
 
@@ -1176,6 +1741,7 @@ extension RebuildReport: Equatable, Hashable {
         hasher.combine(indexed)
         hasher.combine(tablesMaterialized)
         hasher.combine(typesInferred)
+        hasher.combine(warnings)
     }
 }
 
@@ -1190,7 +1756,8 @@ public struct FfiConverterTypeRebuildReport: FfiConverterRustBuffer {
             try RebuildReport(
                 indexed: FfiConverterUInt64.read(from: &buf), 
                 tablesMaterialized: FfiConverterUInt64.read(from: &buf), 
-                typesInferred: FfiConverterSequenceString.read(from: &buf)
+                typesInferred: FfiConverterSequenceString.read(from: &buf), 
+                warnings: FfiConverterSequenceTypeRebuildWarningRecord.read(from: &buf)
         )
     }
 
@@ -1198,6 +1765,7 @@ public struct FfiConverterTypeRebuildReport: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.indexed, into: &buf)
         FfiConverterUInt64.write(value.tablesMaterialized, into: &buf)
         FfiConverterSequenceString.write(value.typesInferred, into: &buf)
+        FfiConverterSequenceTypeRebuildWarningRecord.write(value.warnings, into: &buf)
     }
 }
 
@@ -1218,6 +1786,346 @@ public func FfiConverterTypeRebuildReport_lower(_ value: RebuildReport) -> RustB
 
 
 /**
+ * FFI-safe reindex warning (one per skipped/poisoned file).
+ */
+public struct RebuildWarningRecord {
+    public var code: String
+    public var message: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(code: String, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
+
+#if compiler(>=6)
+extension RebuildWarningRecord: Sendable {}
+#endif
+
+
+extension RebuildWarningRecord: Equatable, Hashable {
+    public static func ==(lhs: RebuildWarningRecord, rhs: RebuildWarningRecord) -> Bool {
+        if lhs.code != rhs.code {
+            return false
+        }
+        if lhs.message != rhs.message {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(code)
+        hasher.combine(message)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRebuildWarningRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RebuildWarningRecord {
+        return
+            try RebuildWarningRecord(
+                code: FfiConverterString.read(from: &buf), 
+                message: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RebuildWarningRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.code, into: &buf)
+        FfiConverterString.write(value.message, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRebuildWarningRecord_lift(_ buf: RustBuffer) throws -> RebuildWarningRecord {
+    return try FfiConverterTypeRebuildWarningRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRebuildWarningRecord_lower(_ value: RebuildWarningRecord) -> RustBuffer {
+    return FfiConverterTypeRebuildWarningRecord.lower(value)
+}
+
+
+/**
+ * FFI-safe schema-apply report.
+ */
+public struct SchemaApplyReportRecord {
+    public var dryRun: Bool
+    public var applied: Bool
+    public var ops: [SchemaPlanOpRecord]
+    public var unsupported: [String]
+    public var warnings: [SchemaWarningRecord]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(dryRun: Bool, applied: Bool, ops: [SchemaPlanOpRecord], unsupported: [String], warnings: [SchemaWarningRecord]) {
+        self.dryRun = dryRun
+        self.applied = applied
+        self.ops = ops
+        self.unsupported = unsupported
+        self.warnings = warnings
+    }
+}
+
+#if compiler(>=6)
+extension SchemaApplyReportRecord: Sendable {}
+#endif
+
+
+extension SchemaApplyReportRecord: Equatable, Hashable {
+    public static func ==(lhs: SchemaApplyReportRecord, rhs: SchemaApplyReportRecord) -> Bool {
+        if lhs.dryRun != rhs.dryRun {
+            return false
+        }
+        if lhs.applied != rhs.applied {
+            return false
+        }
+        if lhs.ops != rhs.ops {
+            return false
+        }
+        if lhs.unsupported != rhs.unsupported {
+            return false
+        }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dryRun)
+        hasher.combine(applied)
+        hasher.combine(ops)
+        hasher.combine(unsupported)
+        hasher.combine(warnings)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSchemaApplyReportRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SchemaApplyReportRecord {
+        return
+            try SchemaApplyReportRecord(
+                dryRun: FfiConverterBool.read(from: &buf), 
+                applied: FfiConverterBool.read(from: &buf), 
+                ops: FfiConverterSequenceTypeSchemaPlanOpRecord.read(from: &buf), 
+                unsupported: FfiConverterSequenceString.read(from: &buf), 
+                warnings: FfiConverterSequenceTypeSchemaWarningRecord.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SchemaApplyReportRecord, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.dryRun, into: &buf)
+        FfiConverterBool.write(value.applied, into: &buf)
+        FfiConverterSequenceTypeSchemaPlanOpRecord.write(value.ops, into: &buf)
+        FfiConverterSequenceString.write(value.unsupported, into: &buf)
+        FfiConverterSequenceTypeSchemaWarningRecord.write(value.warnings, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaApplyReportRecord_lift(_ buf: RustBuffer) throws -> SchemaApplyReportRecord {
+    return try FfiConverterTypeSchemaApplyReportRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaApplyReportRecord_lower(_ value: SchemaApplyReportRecord) -> RustBuffer {
+    return FfiConverterTypeSchemaApplyReportRecord.lower(value)
+}
+
+
+/**
+ * FFI-safe single schema-plan operation report.
+ */
+public struct SchemaPlanOpRecord {
+    public var kind: String
+    public var table: String
+    public var detail: String
+    public var destructive: Bool
+    public var sql: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: String, table: String, detail: String, destructive: Bool, sql: String) {
+        self.kind = kind
+        self.table = table
+        self.detail = detail
+        self.destructive = destructive
+        self.sql = sql
+    }
+}
+
+#if compiler(>=6)
+extension SchemaPlanOpRecord: Sendable {}
+#endif
+
+
+extension SchemaPlanOpRecord: Equatable, Hashable {
+    public static func ==(lhs: SchemaPlanOpRecord, rhs: SchemaPlanOpRecord) -> Bool {
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.table != rhs.table {
+            return false
+        }
+        if lhs.detail != rhs.detail {
+            return false
+        }
+        if lhs.destructive != rhs.destructive {
+            return false
+        }
+        if lhs.sql != rhs.sql {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(table)
+        hasher.combine(detail)
+        hasher.combine(destructive)
+        hasher.combine(sql)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSchemaPlanOpRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SchemaPlanOpRecord {
+        return
+            try SchemaPlanOpRecord(
+                kind: FfiConverterString.read(from: &buf), 
+                table: FfiConverterString.read(from: &buf), 
+                detail: FfiConverterString.read(from: &buf), 
+                destructive: FfiConverterBool.read(from: &buf), 
+                sql: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SchemaPlanOpRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.table, into: &buf)
+        FfiConverterString.write(value.detail, into: &buf)
+        FfiConverterBool.write(value.destructive, into: &buf)
+        FfiConverterString.write(value.sql, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaPlanOpRecord_lift(_ buf: RustBuffer) throws -> SchemaPlanOpRecord {
+    return try FfiConverterTypeSchemaPlanOpRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaPlanOpRecord_lower(_ value: SchemaPlanOpRecord) -> RustBuffer {
+    return FfiConverterTypeSchemaPlanOpRecord.lower(value)
+}
+
+
+/**
+ * FFI-safe schema-apply warning.
+ */
+public struct SchemaWarningRecord {
+    public var code: String
+    public var message: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(code: String, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
+
+#if compiler(>=6)
+extension SchemaWarningRecord: Sendable {}
+#endif
+
+
+extension SchemaWarningRecord: Equatable, Hashable {
+    public static func ==(lhs: SchemaWarningRecord, rhs: SchemaWarningRecord) -> Bool {
+        if lhs.code != rhs.code {
+            return false
+        }
+        if lhs.message != rhs.message {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(code)
+        hasher.combine(message)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSchemaWarningRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SchemaWarningRecord {
+        return
+            try SchemaWarningRecord(
+                code: FfiConverterString.read(from: &buf), 
+                message: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SchemaWarningRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.code, into: &buf)
+        FfiConverterString.write(value.message, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaWarningRecord_lift(_ buf: RustBuffer) throws -> SchemaWarningRecord {
+    return try FfiConverterTypeSchemaWarningRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaWarningRecord_lower(_ value: SchemaWarningRecord) -> RustBuffer {
+    return FfiConverterTypeSchemaWarningRecord.lower(value)
+}
+
+
+/**
  * FFI-safe search result.
  */
 public struct SearchResult {
@@ -1226,15 +2134,25 @@ public struct SearchResult {
     public var path: String
     public var snippet: String
     public var rank: Double
+    public var updatedAt: String
+    public var tags: [String]
+    public var doogatType: String?
+    public var fields: [FieldEntry]
+    public var createdAt: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, path: String, snippet: String, rank: Double) {
+    public init(id: String, title: String, path: String, snippet: String, rank: Double, updatedAt: String, tags: [String], doogatType: String?, fields: [FieldEntry], createdAt: String?) {
         self.id = id
         self.title = title
         self.path = path
         self.snippet = snippet
         self.rank = rank
+        self.updatedAt = updatedAt
+        self.tags = tags
+        self.doogatType = doogatType
+        self.fields = fields
+        self.createdAt = createdAt
     }
 }
 
@@ -1260,6 +2178,21 @@ extension SearchResult: Equatable, Hashable {
         if lhs.rank != rhs.rank {
             return false
         }
+        if lhs.updatedAt != rhs.updatedAt {
+            return false
+        }
+        if lhs.tags != rhs.tags {
+            return false
+        }
+        if lhs.doogatType != rhs.doogatType {
+            return false
+        }
+        if lhs.fields != rhs.fields {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
         return true
     }
 
@@ -1269,6 +2202,11 @@ extension SearchResult: Equatable, Hashable {
         hasher.combine(path)
         hasher.combine(snippet)
         hasher.combine(rank)
+        hasher.combine(updatedAt)
+        hasher.combine(tags)
+        hasher.combine(doogatType)
+        hasher.combine(fields)
+        hasher.combine(createdAt)
     }
 }
 
@@ -1285,7 +2223,12 @@ public struct FfiConverterTypeSearchResult: FfiConverterRustBuffer {
                 title: FfiConverterString.read(from: &buf), 
                 path: FfiConverterString.read(from: &buf), 
                 snippet: FfiConverterString.read(from: &buf), 
-                rank: FfiConverterDouble.read(from: &buf)
+                rank: FfiConverterDouble.read(from: &buf), 
+                updatedAt: FfiConverterString.read(from: &buf), 
+                tags: FfiConverterSequenceString.read(from: &buf), 
+                doogatType: FfiConverterOptionString.read(from: &buf), 
+                fields: FfiConverterSequenceTypeFieldEntry.read(from: &buf), 
+                createdAt: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1295,6 +2238,11 @@ public struct FfiConverterTypeSearchResult: FfiConverterRustBuffer {
         FfiConverterString.write(value.path, into: &buf)
         FfiConverterString.write(value.snippet, into: &buf)
         FfiConverterDouble.write(value.rank, into: &buf)
+        FfiConverterString.write(value.updatedAt, into: &buf)
+        FfiConverterSequenceString.write(value.tags, into: &buf)
+        FfiConverterOptionString.write(value.doogatType, into: &buf)
+        FfiConverterSequenceTypeFieldEntry.write(value.fields, into: &buf)
+        FfiConverterOptionString.write(value.createdAt, into: &buf)
     }
 }
 
@@ -1311,6 +2259,87 @@ public func FfiConverterTypeSearchResult_lift(_ buf: RustBuffer) throws -> Searc
 #endif
 public func FfiConverterTypeSearchResult_lower(_ value: SearchResult) -> RustBuffer {
     return FfiConverterTypeSearchResult.lower(value)
+}
+
+
+/**
+ * FFI-safe mirror of [`Section`].
+ */
+public struct SectionRecord {
+    public var heading: String
+    public var level: UInt8
+    public var content: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(heading: String, level: UInt8, content: String) {
+        self.heading = heading
+        self.level = level
+        self.content = content
+    }
+}
+
+#if compiler(>=6)
+extension SectionRecord: Sendable {}
+#endif
+
+
+extension SectionRecord: Equatable, Hashable {
+    public static func ==(lhs: SectionRecord, rhs: SectionRecord) -> Bool {
+        if lhs.heading != rhs.heading {
+            return false
+        }
+        if lhs.level != rhs.level {
+            return false
+        }
+        if lhs.content != rhs.content {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(heading)
+        hasher.combine(level)
+        hasher.combine(content)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSectionRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SectionRecord {
+        return
+            try SectionRecord(
+                heading: FfiConverterString.read(from: &buf), 
+                level: FfiConverterUInt8.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SectionRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.heading, into: &buf)
+        FfiConverterUInt8.write(value.level, into: &buf)
+        FfiConverterString.write(value.content, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSectionRecord_lift(_ buf: RustBuffer) throws -> SectionRecord {
+    return try FfiConverterTypeSectionRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSectionRecord_lower(_ value: SectionRecord) -> RustBuffer {
+    return FfiConverterTypeSectionRecord.lower(value)
 }
 
 
@@ -1496,6 +2525,340 @@ public func FfiConverterTypeTypeSchemaRecord_lower(_ value: TypeSchemaRecord) ->
 
 
 /**
+ * FFI-safe update result, a lossless-for-the-named-fields mirror of the
+ * core [`ParsedDoogat`] payload (PRD 00177). `extra` still degrades nested
+ * lists/maps per [`core_to_field_value`]'s documented contract.
+ */
+public struct UpdateResultRecord {
+    public var id: String
+    public var title: String?
+    public var doogatType: String?
+    public var tags: [String]
+    public var path: String
+    public var body: String
+    public var date: String?
+    public var extra: [FieldEntryValue]
+    public var sections: [SectionRecord]
+    public var links: [LinkRecord]
+    public var updatedAt: String?
+    public var warnings: [RebuildWarningRecord]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, title: String?, doogatType: String?, tags: [String], path: String, body: String, date: String?, extra: [FieldEntryValue], sections: [SectionRecord], links: [LinkRecord], updatedAt: String?, warnings: [RebuildWarningRecord]) {
+        self.id = id
+        self.title = title
+        self.doogatType = doogatType
+        self.tags = tags
+        self.path = path
+        self.body = body
+        self.date = date
+        self.extra = extra
+        self.sections = sections
+        self.links = links
+        self.updatedAt = updatedAt
+        self.warnings = warnings
+    }
+}
+
+#if compiler(>=6)
+extension UpdateResultRecord: Sendable {}
+#endif
+
+
+extension UpdateResultRecord: Equatable, Hashable {
+    public static func ==(lhs: UpdateResultRecord, rhs: UpdateResultRecord) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.doogatType != rhs.doogatType {
+            return false
+        }
+        if lhs.tags != rhs.tags {
+            return false
+        }
+        if lhs.path != rhs.path {
+            return false
+        }
+        if lhs.body != rhs.body {
+            return false
+        }
+        if lhs.date != rhs.date {
+            return false
+        }
+        if lhs.extra != rhs.extra {
+            return false
+        }
+        if lhs.sections != rhs.sections {
+            return false
+        }
+        if lhs.links != rhs.links {
+            return false
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return false
+        }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(doogatType)
+        hasher.combine(tags)
+        hasher.combine(path)
+        hasher.combine(body)
+        hasher.combine(date)
+        hasher.combine(extra)
+        hasher.combine(sections)
+        hasher.combine(links)
+        hasher.combine(updatedAt)
+        hasher.combine(warnings)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdateResultRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdateResultRecord {
+        return
+            try UpdateResultRecord(
+                id: FfiConverterString.read(from: &buf), 
+                title: FfiConverterOptionString.read(from: &buf), 
+                doogatType: FfiConverterOptionString.read(from: &buf), 
+                tags: FfiConverterSequenceString.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf), 
+                body: FfiConverterString.read(from: &buf), 
+                date: FfiConverterOptionString.read(from: &buf), 
+                extra: FfiConverterSequenceTypeFieldEntryValue.read(from: &buf), 
+                sections: FfiConverterSequenceTypeSectionRecord.read(from: &buf), 
+                links: FfiConverterSequenceTypeLinkRecord.read(from: &buf), 
+                updatedAt: FfiConverterOptionString.read(from: &buf), 
+                warnings: FfiConverterSequenceTypeRebuildWarningRecord.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdateResultRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.doogatType, into: &buf)
+        FfiConverterSequenceString.write(value.tags, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterString.write(value.body, into: &buf)
+        FfiConverterOptionString.write(value.date, into: &buf)
+        FfiConverterSequenceTypeFieldEntryValue.write(value.extra, into: &buf)
+        FfiConverterSequenceTypeSectionRecord.write(value.sections, into: &buf)
+        FfiConverterSequenceTypeLinkRecord.write(value.links, into: &buf)
+        FfiConverterOptionString.write(value.updatedAt, into: &buf)
+        FfiConverterSequenceTypeRebuildWarningRecord.write(value.warnings, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdateResultRecord_lift(_ buf: RustBuffer) throws -> UpdateResultRecord {
+    return try FfiConverterTypeUpdateResultRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdateResultRecord_lower(_ value: UpdateResultRecord) -> RustBuffer {
+    return FfiConverterTypeUpdateResultRecord.lower(value)
+}
+
+
+/**
+ * FFI-safe structured update input. A `None` field leaves the stored value
+ * unchanged; `unset_fields` removes frontmatter keys.
+ */
+public struct UpdateStructuredInput {
+    public var title: String?
+    public var tags: [String]?
+    public var doogatType: String?
+    public var body: String?
+    public var fields: [FieldEntryValue]
+    public var unsetFields: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(title: String?, tags: [String]?, doogatType: String?, body: String?, fields: [FieldEntryValue], unsetFields: [String]) {
+        self.title = title
+        self.tags = tags
+        self.doogatType = doogatType
+        self.body = body
+        self.fields = fields
+        self.unsetFields = unsetFields
+    }
+}
+
+#if compiler(>=6)
+extension UpdateStructuredInput: Sendable {}
+#endif
+
+
+extension UpdateStructuredInput: Equatable, Hashable {
+    public static func ==(lhs: UpdateStructuredInput, rhs: UpdateStructuredInput) -> Bool {
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.tags != rhs.tags {
+            return false
+        }
+        if lhs.doogatType != rhs.doogatType {
+            return false
+        }
+        if lhs.body != rhs.body {
+            return false
+        }
+        if lhs.fields != rhs.fields {
+            return false
+        }
+        if lhs.unsetFields != rhs.unsetFields {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(title)
+        hasher.combine(tags)
+        hasher.combine(doogatType)
+        hasher.combine(body)
+        hasher.combine(fields)
+        hasher.combine(unsetFields)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUpdateStructuredInput: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UpdateStructuredInput {
+        return
+            try UpdateStructuredInput(
+                title: FfiConverterOptionString.read(from: &buf), 
+                tags: FfiConverterOptionSequenceString.read(from: &buf), 
+                doogatType: FfiConverterOptionString.read(from: &buf), 
+                body: FfiConverterOptionString.read(from: &buf), 
+                fields: FfiConverterSequenceTypeFieldEntryValue.read(from: &buf), 
+                unsetFields: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UpdateStructuredInput, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionSequenceString.write(value.tags, into: &buf)
+        FfiConverterOptionString.write(value.doogatType, into: &buf)
+        FfiConverterOptionString.write(value.body, into: &buf)
+        FfiConverterSequenceTypeFieldEntryValue.write(value.fields, into: &buf)
+        FfiConverterSequenceString.write(value.unsetFields, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdateStructuredInput_lift(_ buf: RustBuffer) throws -> UpdateStructuredInput {
+    return try FfiConverterTypeUpdateStructuredInput.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUpdateStructuredInput_lower(_ value: UpdateStructuredInput) -> RustBuffer {
+    return FfiConverterTypeUpdateStructuredInput.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * FFI-safe mirror of [`ConflictAction`].
+ */
+
+public enum ConflictActionRecord {
+    
+    case error
+    case ignore
+}
+
+
+#if compiler(>=6)
+extension ConflictActionRecord: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConflictActionRecord: FfiConverterRustBuffer {
+    typealias SwiftType = ConflictActionRecord
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConflictActionRecord {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .error
+        
+        case 2: return .ignore
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ConflictActionRecord, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .error:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .ignore:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConflictActionRecord_lift(_ buf: RustBuffer) throws -> ConflictActionRecord {
+    return try FfiConverterTypeConflictActionRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConflictActionRecord_lower(_ value: ConflictActionRecord) -> RustBuffer {
+    return FfiConverterTypeConflictActionRecord.lower(value)
+}
+
+
+extension ConflictActionRecord: Equatable, Hashable {}
+
+
+
+
+
+
+
+/**
  * FFI error enum exposed to Swift/Kotlin via UniFFI.
  */
 public enum DdbError: Swift.Error {
@@ -1518,9 +2881,11 @@ public enum DdbError: Swift.Error {
     )
     case Config(msg: String
     )
-    case Validation(msg: String
+    case Validation(msg: String, code: String?, context: [DdbErrorContextEntry]
     )
-    case SqlEngine(msg: String
+    case SqlEngine(msg: String, code: String?, context: [DdbErrorContextEntry]
+    )
+    case Conflict(msg: String, code: String?, context: [DdbErrorContextEntry]
     )
     case VersionMismatch(msg: String
     )
@@ -1565,12 +2930,21 @@ public struct FfiConverterTypeDdbError: FfiConverterRustBuffer {
             msg: try FfiConverterString.read(from: &buf)
             )
         case 9: return .Validation(
-            msg: try FfiConverterString.read(from: &buf)
+            msg: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterOptionString.read(from: &buf), 
+            context: try FfiConverterSequenceTypeDdbErrorContextEntry.read(from: &buf)
             )
         case 10: return .SqlEngine(
-            msg: try FfiConverterString.read(from: &buf)
+            msg: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterOptionString.read(from: &buf), 
+            context: try FfiConverterSequenceTypeDdbErrorContextEntry.read(from: &buf)
             )
-        case 11: return .VersionMismatch(
+        case 11: return .Conflict(
+            msg: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterOptionString.read(from: &buf), 
+            context: try FfiConverterSequenceTypeDdbErrorContextEntry.read(from: &buf)
+            )
+        case 12: return .VersionMismatch(
             msg: try FfiConverterString.read(from: &buf)
             )
 
@@ -1625,18 +2999,29 @@ public struct FfiConverterTypeDdbError: FfiConverterRustBuffer {
             FfiConverterString.write(msg, into: &buf)
             
         
-        case let .Validation(msg):
+        case let .Validation(msg,code,context):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(msg, into: &buf)
+            FfiConverterOptionString.write(code, into: &buf)
+            FfiConverterSequenceTypeDdbErrorContextEntry.write(context, into: &buf)
             
         
-        case let .SqlEngine(msg):
+        case let .SqlEngine(msg,code,context):
             writeInt(&buf, Int32(10))
             FfiConverterString.write(msg, into: &buf)
+            FfiConverterOptionString.write(code, into: &buf)
+            FfiConverterSequenceTypeDdbErrorContextEntry.write(context, into: &buf)
+            
+        
+        case let .Conflict(msg,code,context):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(msg, into: &buf)
+            FfiConverterOptionString.write(code, into: &buf)
+            FfiConverterSequenceTypeDdbErrorContextEntry.write(context, into: &buf)
             
         
         case let .VersionMismatch(msg):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(msg, into: &buf)
             
         }
@@ -1673,6 +3058,387 @@ extension DdbError: Foundation.LocalizedError {
 
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * FFI-safe scalar field value (one element of a [`FieldValue::List`]).
+ * Non-recursive on purpose: uniffi 0.29.5 cannot express recursion
+ * through `Vec`.
+ */
+
+public enum FieldScalar {
+    
+    case str(String
+    )
+    case num(Double
+    )
+    case bool(Bool
+    )
+}
+
+
+#if compiler(>=6)
+extension FieldScalar: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFieldScalar: FfiConverterRustBuffer {
+    typealias SwiftType = FieldScalar
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FieldScalar {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .str(try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .num(try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 3: return .bool(try FfiConverterBool.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FieldScalar, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .str(v1):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .num(v1):
+            writeInt(&buf, Int32(2))
+            FfiConverterDouble.write(v1, into: &buf)
+            
+        
+        case let .bool(v1):
+            writeInt(&buf, Int32(3))
+            FfiConverterBool.write(v1, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldScalar_lift(_ buf: RustBuffer) throws -> FieldScalar {
+    return try FfiConverterTypeFieldScalar.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldScalar_lower(_ value: FieldScalar) -> RustBuffer {
+    return FfiConverterTypeFieldScalar.lower(value)
+}
+
+
+extension FieldScalar: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * FFI-safe structured field value.
+ */
+
+public enum FieldValue {
+    
+    case str(String
+    )
+    case num(Double
+    )
+    case bool(Bool
+    )
+    case list([FieldScalar]
+    )
+}
+
+
+#if compiler(>=6)
+extension FieldValue: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFieldValue: FfiConverterRustBuffer {
+    typealias SwiftType = FieldValue
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FieldValue {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .str(try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .num(try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 3: return .bool(try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 4: return .list(try FfiConverterSequenceTypeFieldScalar.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FieldValue, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .str(v1):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .num(v1):
+            writeInt(&buf, Int32(2))
+            FfiConverterDouble.write(v1, into: &buf)
+            
+        
+        case let .bool(v1):
+            writeInt(&buf, Int32(3))
+            FfiConverterBool.write(v1, into: &buf)
+            
+        
+        case let .list(v1):
+            writeInt(&buf, Int32(4))
+            FfiConverterSequenceTypeFieldScalar.write(v1, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldValue_lift(_ buf: RustBuffer) throws -> FieldValue {
+    return try FfiConverterTypeFieldValue.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFieldValue_lower(_ value: FieldValue) -> RustBuffer {
+    return FfiConverterTypeFieldValue.lower(value)
+}
+
+
+extension FieldValue: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * FFI-safe mirror of [`LinkKind`].
+ */
+
+public enum LinkKindRecord {
+    
+    case wikiLink
+    case markdownLink
+    case embed
+    case bareUrl
+}
+
+
+#if compiler(>=6)
+extension LinkKindRecord: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLinkKindRecord: FfiConverterRustBuffer {
+    typealias SwiftType = LinkKindRecord
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LinkKindRecord {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .wikiLink
+        
+        case 2: return .markdownLink
+        
+        case 3: return .embed
+        
+        case 4: return .bareUrl
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LinkKindRecord, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .wikiLink:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .markdownLink:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .embed:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .bareUrl:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkKindRecord_lift(_ buf: RustBuffer) throws -> LinkKindRecord {
+    return try FfiConverterTypeLinkKindRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkKindRecord_lower(_ value: LinkKindRecord) -> RustBuffer {
+    return FfiConverterTypeLinkKindRecord.lower(value)
+}
+
+
+extension LinkKindRecord: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * FFI-safe mirror of [`Zone`].
+ */
+
+public enum ZoneRecord {
+    
+    case frontmatter
+    case body
+    case reference
+}
+
+
+#if compiler(>=6)
+extension ZoneRecord: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeZoneRecord: FfiConverterRustBuffer {
+    typealias SwiftType = ZoneRecord
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ZoneRecord {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .frontmatter
+        
+        case 2: return .body
+        
+        case 3: return .reference
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ZoneRecord, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .frontmatter:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .body:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .reference:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeZoneRecord_lift(_ buf: RustBuffer) throws -> ZoneRecord {
+    return try FfiConverterTypeZoneRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeZoneRecord_lower(_ value: ZoneRecord) -> RustBuffer {
+    return FfiConverterTypeZoneRecord.lower(value)
+}
+
+
+extension ZoneRecord: Equatable, Hashable {}
+
+
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -1692,6 +3458,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceString.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -1775,6 +3565,181 @@ fileprivate struct FfiConverterSequenceTypeColumnDefRecord: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDdbErrorContextEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [DdbErrorContextEntry]
+
+    public static func write(_ value: [DdbErrorContextEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDdbErrorContextEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DdbErrorContextEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DdbErrorContextEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDdbErrorContextEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFieldEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [FieldEntry]
+
+    public static func write(_ value: [FieldEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFieldEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FieldEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FieldEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFieldEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFieldEntryValue: FfiConverterRustBuffer {
+    typealias SwiftType = [FieldEntryValue]
+
+    public static func write(_ value: [FieldEntryValue], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFieldEntryValue.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FieldEntryValue] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FieldEntryValue]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFieldEntryValue.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeLinkRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [LinkRecord]
+
+    public static func write(_ value: [LinkRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLinkRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LinkRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LinkRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLinkRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRebuildWarningRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [RebuildWarningRecord]
+
+    public static func write(_ value: [RebuildWarningRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRebuildWarningRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RebuildWarningRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RebuildWarningRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRebuildWarningRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSchemaPlanOpRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [SchemaPlanOpRecord]
+
+    public static func write(_ value: [SchemaPlanOpRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSchemaPlanOpRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SchemaPlanOpRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SchemaPlanOpRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSchemaPlanOpRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSchemaWarningRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [SchemaWarningRecord]
+
+    public static func write(_ value: [SchemaWarningRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSchemaWarningRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SchemaWarningRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SchemaWarningRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSchemaWarningRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeSearchResult: FfiConverterRustBuffer {
     typealias SwiftType = [SearchResult]
 
@@ -1800,6 +3765,31 @@ fileprivate struct FfiConverterSequenceTypeSearchResult: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeSectionRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [SectionRecord]
+
+    public static func write(_ value: [SectionRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSectionRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SectionRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SectionRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSectionRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeTypeSchemaRecord: FfiConverterRustBuffer {
     typealias SwiftType = [TypeSchemaRecord]
 
@@ -1817,6 +3807,31 @@ fileprivate struct FfiConverterSequenceTypeTypeSchemaRecord: FfiConverterRustBuf
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeTypeSchemaRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFieldScalar: FfiConverterRustBuffer {
+    typealias SwiftType = [FieldScalar]
+
+    public static func write(_ value: [FieldScalar], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFieldScalar.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FieldScalar] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FieldScalar]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFieldScalar.read(from: &buf))
         }
         return seq
     }
@@ -1862,6 +3877,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_ddb_core_checksum_method_doogatdriver_apply_schema() != 19707) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ddb_core_checksum_method_doogatdriver_attach_file() != 44248) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1874,7 +3892,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_ddb_core_checksum_method_doogatdriver_compact() != 62532) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_ddb_core_checksum_method_doogatdriver_create_doogat() != 17793) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_create_structured() != 62758) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ddb_core_checksum_method_doogatdriver_delete_doogat() != 32617) {
@@ -1922,10 +3940,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_ddb_core_checksum_method_doogatdriver_search() != 43993) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ddb_core_checksum_method_doogatdriver_search_filtered() != 38782) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ddb_core_checksum_method_doogatdriver_search_paginated() != 42656) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_ddb_core_checksum_method_doogatdriver_update_doogat() != 39210) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_update_structured() != 25514) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ddb_core_checksum_constructor_doogatdriver_create_repo() != 44522) {

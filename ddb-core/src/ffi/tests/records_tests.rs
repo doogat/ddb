@@ -636,6 +636,45 @@ fn create_result_record_mirrors_body_extra_sections_links_and_updated_at() {
     );
 }
 
+/// PRD 00184 task 4: `ColumnDefRecord::from` must expose each column's zone,
+/// matching the GraphQL introspection value exactly -- `None` for an
+/// undeclared zone, never a default.
+#[test]
+fn column_def_record_from_maps_zone_matching_graphql_null_semantics() {
+    use crate::ffi::records::ColumnDefRecord;
+    use crate::types::{ColumnDef, OnDeleteAction, Zone};
+
+    let col = |zone: Option<Zone>| ColumnDef {
+        name: "x".into(),
+        data_type: "TEXT".into(),
+        references: None,
+        zone,
+        required: false,
+        search_boost: None,
+        allowed_values: None,
+        default_value: None,
+        on_delete: OnDeleteAction::Restrict,
+    };
+
+    assert_eq!(
+        ColumnDefRecord::from(&col(None)).zone,
+        None,
+        "an undeclared zone must map to None, matching GraphQL's null, not a default"
+    );
+    assert_eq!(
+        ColumnDefRecord::from(&col(Some(Zone::Frontmatter))).zone,
+        Some("frontmatter".to_string())
+    );
+    assert_eq!(
+        ColumnDefRecord::from(&col(Some(Zone::Body))).zone,
+        Some("body".to_string())
+    );
+    assert_eq!(
+        ColumnDefRecord::from(&col(Some(Zone::Reference))).zone,
+        Some("reference".to_string())
+    );
+}
+
 #[test]
 fn update_result_record_mirrors_body_extra_sections_links_and_updated_at() {
     let tmp = tempfile::tempdir().unwrap();

@@ -212,6 +212,7 @@ pub struct ColumnDefRecord {
     pub data_type: String,
     pub references: Option<String>,
     pub required: bool,
+    pub zone: Option<String>,
 }
 
 impl From<&crate::types::ColumnDef> for ColumnDefRecord {
@@ -221,8 +222,21 @@ impl From<&crate::types::ColumnDef> for ColumnDefRecord {
             data_type: c.data_type.clone(),
             references: c.references.clone(),
             required: c.required,
+            zone: c.zone.as_ref().map(zone_token),
         }
     }
+}
+
+/// Matches the GraphQL introspection token exactly (null for an undeclared
+/// zone, never a default) -- `ddb-server/src/schema/base_types/to_gql.rs`'s
+/// `column_def_to_value`.
+fn zone_token(zone: &crate::types::Zone) -> String {
+    match zone {
+        crate::types::Zone::Frontmatter => "frontmatter",
+        crate::types::Zone::Body => "body",
+        crate::types::Zone::Reference => "reference",
+    }
+    .to_string()
 }
 
 /// FFI-safe type schema for typedef discovery.
