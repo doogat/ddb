@@ -929,4 +929,264 @@ mod tests {
             plan.ops
         );
     }
+
+    // ---- 16: unique_together deltas on existing types ----
+
+    /// Build a `unique_together` value from string literals.
+    fn uniq(constraints: &[&[&str]]) -> Option<Vec<Vec<String>>> {
+        Some(
+            constraints
+                .iter()
+                .map(|c| c.iter().map(|s| s.to_string()).collect())
+                .collect(),
+        )
+    }
+
+    /// Table with TEXT columns `cols` and the given `unique_together`.
+    fn utbl(name: &str, cols: &[&str], unique: Option<Vec<Vec<String>>>) -> TableSchema {
+        let mut t = tbl(name, cols.iter().map(|c| col(c, "TEXT")).collect());
+        t.unique_together = unique;
+        t
+    }
+
+    fn add_uc(table: &str, cols: &[&str]) -> PlanOp {
+        PlanOp::AddUniqueConstraint {
+            table: table.into(),
+            columns: cols.iter().map(|c| c.to_string()).collect(),
+        }
+    }
+
+    fn drop_uc(table: &str, cols: &[&str]) -> PlanOp {
+        PlanOp::DropUniqueConstraint {
+            table: table.into(),
+            columns: cols.iter().map(|c| c.to_string()).collect(),
+        }
+    }
+
+    /// Only the unique-constraint ops of a plan, in plan order.
+    fn unique_ops(ops: &[PlanOp]) -> Vec<&PlanOp> {
+        ops.iter()
+            .filter(|op| {
+                matches!(
+                    op,
+                    PlanOp::AddUniqueConstraint { .. } | PlanOp::DropUniqueConstraint { .. }
+                )
+            })
+            .collect()
+    }
+
+    fn mentions_unique_together(unsupported: &[String]) -> bool {
+        unsupported.iter().any(|m| m.contains("unique_together"))
+    }
+
+    const MEMBER_COLS: &[&str] = &["person", "person_id", "team"];
+    const BOOKING_COLS: &[&str] = &["day", "room"];
+
+    #[test]
+    fn added_unique_constraint_on_existing_type_yields_add_not_unsupported() {
+        let desired = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        let live = utbl("membership", MEMBER_COLS, None);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(
+            plan.ops,
+            vec![add_uc("membership", &["person", "team"])],
+            "a new constraint on an existing type must be exactly one AddUniqueConstraint"
+        );
+        assert!(
+            !mentions_unique_together(&plan.unsupported),
+            "a supported unique_together change must not be flagged unsupported: {:?}",
+            plan.unsupported
+        );
+        assert!(plan.unsupported.is_empty());
+    }
+
+    #[test]
+    fn added_constraint_beside_existing_prefix_constraint_adds_only_the_new_one() {
+        // Live [day] is a prefix of desired [day, room]: a prefix match must
+        // not count the new constraint as already present.
+        let desired = utbl("booking", BOOKING_COLS, uniq(&[&["day"], &["day", "room"]]));
+        let live = utbl("booking", BOOKING_COLS, uniq(&[&["day"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(plan.ops, vec![add_uc("booking", &["day", "room"])]);
+        assert!(!mentions_unique_together(&plan.unsupported));
+    }
+
+    #[test]
+    fn removed_unique_constraint_on_existing_type_yields_drop_not_unsupported() {
+        let desired = utbl("membership", MEMBER_COLS, None);
+        let live = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(
+            plan.ops,
+            vec![drop_uc("membership", &["person", "team"])],
+            "a constraint gone from desired must be exactly one DropUniqueConstraint"
+        );
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn removed_one_of_two_constraints_drops_only_that_one() {
+        let desired = utbl("booking", BOOKING_COLS, uniq(&[&["day", "room"]]));
+        let live = utbl("booking", BOOKING_COLS, uniq(&[&["day"], &["day", "room"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(plan.ops, vec![drop_uc("booking", &["day"])]);
+        assert!(!mentions_unique_together(&plan.unsupported));
+    }
+
+    #[test]
+    fn changed_constraint_columns_yield_drop_old_and_add_new() {
+        // `person_id` shares a prefix with `person`: substring matching fails.
+        let desired = utbl("membership", MEMBER_COLS, uniq(&[&["person_id", "team"]]));
+        let live = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        let ops = unique_ops(&plan.ops);
+        assert_eq!(ops.len(), 2, "exactly one add and one drop: {:?}", plan.ops);
+        assert!(ops.contains(&&add_uc("membership", &["person_id", "team"])), "{:?}", ops);
+        assert!(ops.contains(&&drop_uc("membership", &["person", "team"])), "{:?}", ops);
+        assert_eq!(plan.ops.len(), 2, "no phantom ops: {:?}", plan.ops);
+        assert!(!mentions_unique_together(&plan.unsupported));
+    }
+
+    #[test]
+    fn reordered_constraint_columns_are_unchanged() {
+        let desired = utbl("membership", MEMBER_COLS, uniq(&[&["team", "person"]]));
+        let live = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert!(plan.is_empty(), "column order inside a constraint is not a change: {:?}", plan.ops);
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn reordered_constraint_list_is_unchanged() {
+        // Set-of-sets: both the constraint order and each constraint's column
+        // order differ, yet the constraint sets are equal.
+        let desired = utbl("booking", BOOKING_COLS, uniq(&[&["room", "day"], &["day"]]));
+        let live = utbl("booking", BOOKING_COLS, uniq(&[&["day"], &["day", "room"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert!(plan.is_empty(), "{:?}", plan.ops);
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn absent_or_identical_unique_together_yields_no_unique_op() {
+        let none = utbl("membership", MEMBER_COLS, None);
+        let plan = diff(&doc(vec![none.clone()]), &[Some(none)]);
+        assert!(plan.is_empty(), "both None: {:?}", plan.ops);
+        assert!(plan.unsupported.is_empty());
+
+        let same = utbl("booking", BOOKING_COLS, uniq(&[&["day", "room"], &["room"]]));
+        let plan = diff(&doc(vec![same.clone()]), &[Some(same)]);
+        assert!(plan.is_empty(), "identical constraints: {:?}", plan.ops);
+        assert!(plan.unsupported.is_empty());
+    }
+
+    #[test]
+    fn empty_inner_constraint_is_skipped() {
+        let desired = utbl("membership", MEMBER_COLS, Some(vec![vec![]]));
+        let live = utbl("membership", MEMBER_COLS, None);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert!(plan.is_empty(), "an empty constraint emits no op: {:?}", plan.ops);
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+
+        // An empty constraint beside a real one must not swallow the real one.
+        let desired = utbl(
+            "booking",
+            BOOKING_COLS,
+            Some(vec![vec![], vec!["day".into(), "room".into()]]),
+        );
+        let live = utbl("booking", BOOKING_COLS, None);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert_eq!(plan.ops, vec![add_uc("booking", &["day", "room"])]);
+    }
+
+    #[test]
+    fn unique_constraint_ops_carry_their_own_table_across_types() {
+        let desired_m = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        let live_m = utbl("membership", MEMBER_COLS, None);
+        let desired_b = utbl("booking", BOOKING_COLS, None);
+        let live_b = utbl("booking", BOOKING_COLS, uniq(&[&["day", "room"]]));
+        let plan = diff(
+            &doc(vec![desired_m, desired_b]),
+            &[Some(live_m), Some(live_b)],
+        );
+
+        assert_eq!(plan.ops.len(), 2, "{:?}", plan.ops);
+        assert!(plan.ops.contains(&add_uc("membership", &["person", "team"])), "{:?}", plan.ops);
+        assert!(plan.ops.contains(&drop_uc("booking", &["day", "room"])), "{:?}", plan.ops);
+        assert!(plan.unsupported.is_empty());
+    }
+
+    #[test]
+    fn new_type_with_unique_together_emits_only_create_type() {
+        let t = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        let plan = diff(&doc(vec![t.clone()]), &[None]);
+
+        assert_eq!(plan.ops, vec![PlanOp::CreateType(t)], "create path is unchanged");
+        assert!(plan.unsupported.is_empty());
+    }
+
+    #[test]
+    fn unique_together_change_coexists_with_other_attribute_changes() {
+        let mut desired = utbl("membership", MEMBER_COLS, uniq(&[&["person", "team"]]));
+        desired.search_key = Some("person".into());
+        desired.title_template = Some("{{person}}".into());
+        let live = utbl("membership", MEMBER_COLS, None);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert!(plan.ops.contains(&PlanOp::SetSearchKey {
+            table: "membership".into(),
+            column: Some("person".into()),
+        }), "{:?}", plan.ops);
+        assert!(plan.ops.contains(&add_uc("membership", &["person", "team"])), "{:?}", plan.ops);
+        assert_eq!(plan.ops.len(), 2, "{:?}", plan.ops);
+        assert_eq!(plan.unsupported.len(), 1, "{:?}", plan.unsupported);
+        assert!(plan.unsupported[0].contains("title_template"), "{:?}", plan.unsupported);
+        assert!(!mentions_unique_together(&plan.unsupported));
+    }
+
+    // ---- 17: unique-constraint PlanOp public methods ----
+
+    #[test]
+    fn add_unique_constraint_renders_kind_describes_and_is_not_destructive() {
+        let two = add_uc("membership", &["person", "team"]);
+        assert_eq!(two.render_sql(), r#"ALTER TABLE "membership" ADD UNIQUE ("person", "team")"#);
+        let one = add_uc("meeting-minutes", &["long-desc"]);
+        assert_eq!(one.render_sql(), r#"ALTER TABLE "meeting-minutes" ADD UNIQUE ("long-desc")"#);
+
+        for op in [&two, &one] {
+            assert!(!op.render_sql().ends_with(';'), "{:?}", op);
+            assert_eq!(op.kind(), "add_unique_constraint");
+            assert!(!op.is_destructive(), "adding a constraint is not destructive");
+        }
+        let d = two.describe();
+        assert!(d.contains("membership") && d.contains("person") && d.contains("team"), "{d}");
+        let d = one.describe();
+        assert!(d.contains("meeting-minutes") && d.contains("long-desc"), "{d}");
+        assert_ne!(two.describe(), drop_uc("membership", &["person", "team"]).describe());
+    }
+
+    #[test]
+    fn drop_unique_constraint_renders_kind_describes_and_is_destructive() {
+        let two = drop_uc("booking", &["day", "room"]);
+        assert_eq!(two.render_sql(), r#"ALTER TABLE "booking" DROP UNIQUE ("day", "room")"#);
+        let one = drop_uc("membership", &["person_id"]);
+        assert_eq!(one.render_sql(), r#"ALTER TABLE "membership" DROP UNIQUE ("person_id")"#);
+
+        for op in [&two, &one] {
+            assert!(!op.render_sql().ends_with(';'), "{:?}", op);
+            assert_eq!(op.kind(), "drop_unique_constraint");
+            assert!(op.is_destructive(), "dropping a constraint is destructive");
+        }
+        let d = two.describe();
+        assert!(d.contains("booking") && d.contains("day") && d.contains("room"), "{d}");
+        let d = one.describe();
+        assert!(d.contains("membership") && d.contains("person_id"), "{d}");
+    }
 }
