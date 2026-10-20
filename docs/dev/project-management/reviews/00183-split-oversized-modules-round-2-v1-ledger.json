@@ -1,0 +1,58 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "🟡",
+    "issue": "The docs still use the old layout, so the \"docs reflect the new module layout\" acceptance is not met. Stale references remain in: `docs/src/technical/server.md:1101` and `:1113` (tree shows `base_types.rs` and `filter.rs`); `docs/src/architecture/overview.md:144`, `:185` and `:203`; `docs/src/technical/indexer.md:3` (lists `graph.rs`, `materialize.rs`, `search.rs`); `docs/src/technical/crdt-resolver.md:3` (says `crdt_resolver.rs`, 487 lines); `docs/src/technical/sql-engine.md:552`, `:587`, `:611`, `:615` and `:616` (`dml.rs`, `materialize.rs`, `helpers.rs`, `builders.rs`); `AGENTS.md:20` (`crdt_resolver.rs`). Source comments are stale too, for example `ddb-core/src/indexer/materialize/mod.rs:24`, `ddb-core/src/sql_engine/helpers/identifiers.rs:48` and `ddb-core/src/service/write_helpers.rs:17`.",
+    "file": "docs/src/technical/server.md",
+    "reason": "duplicate of R3 — the same stale-docs defect; the consolidator did not merge the two rows because Alice cited overview.md and Blake cited server.md. Merged into R3, which is being fixed this cycle and carries both file lists. Not dropped."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "The updated module table still assigns initialization and CRUD to `git_ops/mod.rs`, although those implementations moved into `repo_core.rs`. Describe `mod.rs` as holding shared definitions and module declarations; assign initialization and CRUD to `repo_core.rs`.",
+    "file": "docs/src/architecture/modules.md:78",
+    "reason": "merged into R3's docs-refresh fix, whose issue text now names modules.md:78 explicitly. Discarded as a separate row, not as a defect."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "🟡",
+    "issue": "Required original symbol paths were deliberately dropped: `filter::{reverse_relations, ReverseRelation}` and eight `base_types` exports, as recorded in assumptions.md. Current caller compilation does not satisfy the explicit unchanged-surface contract. Restore the original paths and visibilities through module re-exports.",
+    "file": "docs/dev/project-management/meta/assumptions.md:8",
+    "reason": "contradicted by verified facts. The dropped names were `pub(crate)`, not public: Alice verified independently that every `pub` item stays `pub` and every re-export is present, and Blake confirmed nothing in the crate consumes those paths. The items remain `pub(crate)` and reachable inside the `filter` module tree. Keeping the unused re-exports would require a lint-suppression attribute, which this repo's aegis hooks block, so the deviation is the only available shape and is recorded at assumptions.md:8. Bob's claim that caller compilation is unsatisfied is false — the workspace builds and clippy is clean at -D warnings."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "`pub(crate) ReverseRelation` and `reverse_relations` are no longer reachable at `crate::filter::*`, because `mod.rs` does not re-export them. This is a deviation from \"preserve every pub/pub(crate) item and its path\". Nothing in the crate uses them at that path, and the deviation is recorded in `docs/dev/project-management/meta/assumptions.md:8`.",
+    "file": "ddb-server/src/filter/mod.rs:20",
+    "reason": "same defect as R6, same reason: a documented, justified deviation on crate-internal names nobody consumes, where the alternative is a hook-blocked lint suppression. Blake himself recorded it as a note, not a defect."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "`ddb-server/src/filter/tests.rs` is 2235 lines. The filter acceptance says \"every `filter/*.rs` <= 800\", but the Success Metrics say \"production file\". The PRD tree names `tests.rs` itself, so this is probably intended; I note it for the record.",
+    "file": "ddb-server/src/filter/tests.rs",
+    "reason": "out of scope by PRD text. The PRD's success metric is scoped to production files (\"Every resulting production file is <= 800 lines\") and its own structural tree names `filter/tests.rs` as a single colocated test file. Blake flagged it for the record and reached the same reading."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "`actor::tests::shared_actor_preserves_schema_applys_owned_transaction` is flaky under full-suite load. It timed out at `ddb-server/src/actor/tests/mod.rs:22` and passes alone. It is unrelated to the splits but turns the Tier-1 gate red intermittently.",
+    "file": "ddb-server/src/actor/tests/mod.rs:22",
+    "reason": "pre-existing, documented, and outside this PRD's diff: the actor module is in no file this PRD split. It is the known parallel-load flake of PRDs 00177/00178, reproduced and re-verified passing alone (0.62s and 0.89s in two independent runs this cycle). Not this PRD's regression and not its to fix."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "⚪",
+    "issue": "`ddb-core/src/indexer/mod.rs` has 898 production lines (its `#[cfg(test)]` starts at line 899). That is over the cap and is not on the PRD list. The PRD said no unlisted file exceeded 800 at 8fe51c9, so it grew afterwards. This is out of scope, but a future sweep should pick it up.",
+    "file": "ddb-core/src/indexer/mod.rs:899",
+    "reason": "genuine and newly measured, but outside this PRD's enumerated split list, which was fixed at the 8fe51c9 measurement. Fixing it here would be scope creep against surgical-changes. Deferred to batch end so a round-3 sweep PRD picks it up with the rest of the regrown files."
+  }
+]

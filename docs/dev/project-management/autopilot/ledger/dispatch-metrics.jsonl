@@ -568,3 +568,17 @@
 {"id":"d53b3e0a","ended_at":1792453978,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"id":"9811c9c0","ended_at":1792453978,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792453978,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792454051,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"id":"70adfbf0","kind":"bob","task":"review-00183-c1","queued_at":1792455628,"prompt_bytes":13500}
+{"id":"f1f66df9","kind":"carl","task":"review-00183-c1","queued_at":1792455628,"prompt_bytes":6576}
+{"id":"471fd4d3","kind":"bob","task":"review-00183-c1","queued_at":1792456848,"prompt_bytes":13500}
+{"id":"94fca06c","kind":"carl","task":"review-00183-c1","queued_at":1792456848,"prompt_bytes":6576}
+{"id":"5907207d","kind":"bob","task":"review-00183-c1","queued_at":1792457105,"detail":"retry of 471fd4d3"}
+{"id":"5907207d","ended_at":1792458768,"elapsed_s":1663,"outcome":"ok","detail":"retry"}
+{"id":"471fd4d3","ended_at":1792458772,"elapsed_s":1924,"outcome":"error","detail":"exit 1: input_too_large 1597935 chars > 1048576"}
+{"id":"94fca06c","ended_at":1792458776,"elapsed_s":1928,"outcome":"error","detail":"exit 1: copilot monthly quota exhausted"}
+{"id":"5907207d","ended_at":1792459066,"elapsed_s":1961,"outcome":"ok","detail":null}
+{"id":"94fca06c","ended_at":1792459066,"elapsed_s":2218,"outcome":"error","detail":null}
+{"id":"70adfbf0","ended_at":1792459117,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"f1f66df9","ended_at":1792459117,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792459117,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}

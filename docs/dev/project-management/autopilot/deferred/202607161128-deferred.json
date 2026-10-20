@@ -1480,6 +1480,15 @@
       "detail": "module_drift 2 > 1 (., docs/src/technical); note docs/dev/project-management/autopilot/split-notes/00182-where-filter-correctness-completeness-v2.md",
       "op_id": "eefe86bed70f",
       "prd": "00182-where-filter-correctness-completeness-v2.md"
+    },
+    {
+      "type": "out-of-scope",
+      "issue": "ddb-core/src/indexer/mod.rs has 898 production lines, over the 800-line cap, and is not on PRD 00183's enumerated split list (it grew after the 8fe51c9 measurement). A round-3 sweep PRD should pick it up.",
+      "severity": "low",
+      "consensus": "1/3",
+      "reason": "outside this PRD's fixed split list; fixing it here would be scope creep against surgical-changes",
+      "file": "ddb-core/src/indexer/mod.rs:899",
+      "prd": "00183-split-oversized-modules-round-2-v1.md"
     }
   ]
 }
