@@ -10,7 +10,15 @@ mod reload;
 
 #[tokio::test]
 async fn shared_actor_preserves_schema_applys_owned_transaction() {
-    tokio::time::timeout(Duration::from_secs(30), async {
+    // PRD 00184 task 9 (BOB): a full `cargo test-ci` run flagged this test
+    // as timing out at the default 30s budget. Reproduced under full
+    // `cargo test -p ddb-server --lib` parallel load (321 concurrent
+    // tests): the actor round trip itself completes in well under a
+    // second standalone or inside the actor::tests module alone, so the
+    // timeout is resource contention under the full suite's parallelism,
+    // not a logic regression -- widened to tolerate that contention
+    // instead of papering over it with a flaky-test retry.
+    tokio::time::timeout(Duration::from_secs(90), async {
         let tmp = tempfile::tempdir().unwrap();
         DoogatService::init(tmp.path()).unwrap();
         let actor = ActorHandle::spawn(tmp.path().to_path_buf(), EventBus::new(), ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
