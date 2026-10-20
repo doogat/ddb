@@ -9275,3 +9275,5 @@ fn inline_zone_in_batch_round_trips_identically_to_set_zone() {
         "inline ZONE must round-trip identically to SET ZONE"
     );
 }
+
+mod unique_constraint;
