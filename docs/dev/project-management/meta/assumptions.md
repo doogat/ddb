@@ -21,3 +21,8 @@ Ivan (implementor):
 - When a constraint is declared twice in different column orders, the op uses the first declaration's order; the tests only check the first-declared order.
 - When one type both drops and adds a constraint, the drop comes before the add; the tests check membership only, not this order.
 - Duplicate columns inside one constraint (e.g. `[day, day]`) are not reduced; no test covers that case.
+
+## Task 2: Execute unique-constraint PlanOps via custom-DDL handlers with a pre-commit duplicate check
+
+Ivan (review-fix retry, MEDIUM finding):
+- The finding's "add a test" half is out of reach for this dispatch (the test suite lives in `ddb-core/src/sql_engine/tests`, outside the retry's allowlist, and the contract forbids adding tests); only the code half (excluding NULL rows from the duplicate-row check) was applied. A follow-up test-only task should add the NULL-row regression test Pat's finding asked for.
