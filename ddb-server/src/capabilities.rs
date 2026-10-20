@@ -1,3 +1,25 @@
+//! Server version and feature-flag set for the capabilities handshake.
+
+/// Feature flags this server supports, in stable order.
+pub const FLAGS: &[&str] = &[
+    "typed_orderby_base_fields",
+    "relation_where_filters",
+    "inline_zone_ddl",
+    "schema_apply",
+    "offline_sdl",
+    "capabilities_handshake",
+];
+
+/// Server version, fixed at compile time.
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Supported feature flags as owned strings, in `FLAGS` order.
+pub fn capabilities() -> Vec<String> {
+    FLAGS.iter().map(|s| s.to_string()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

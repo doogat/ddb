@@ -1,5 +1,6 @@
 pub mod actor;
 pub mod auth;
+pub mod capabilities;
 pub mod config;
 pub mod error;
 pub mod events;
