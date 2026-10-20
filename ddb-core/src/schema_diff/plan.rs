@@ -62,6 +62,13 @@ pub enum PlanOp {
     SetSingleton { table: String, on: bool },
     RenameColumn { table: String, from: String, to: String },
     DropColumn { table: String, column: String },
+    AddUniqueConstraint { table: String, columns: Vec<String> },
+    DropUniqueConstraint { table: String, columns: Vec<String> },
+}
+
+/// Quote and comma-join a constraint's columns: `"a", "b"`.
+fn quoted_columns(columns: &[String]) -> String {
+    columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ")
 }
 
 impl PlanOp {
@@ -139,6 +146,12 @@ impl PlanOp {
             PlanOp::DropColumn { table, column } => {
                 format!("ALTER TABLE {} DROP COLUMN {}", quote_ident(table), quote_ident(column))
             }
+            PlanOp::AddUniqueConstraint { table, columns } => {
+                format!("ALTER TABLE {} ADD UNIQUE ({})", quote_ident(table), quoted_columns(columns))
+            }
+            PlanOp::DropUniqueConstraint { table, columns } => {
+                format!("ALTER TABLE {} DROP UNIQUE ({})", quote_ident(table), quoted_columns(columns))
+            }
         }
     }
 
@@ -153,11 +166,18 @@ impl PlanOp {
             PlanOp::SetSingleton { .. } => "set_singleton",
             PlanOp::RenameColumn { .. } => "rename_column",
             PlanOp::DropColumn { .. } => "drop_column",
+            PlanOp::AddUniqueConstraint { .. } => "add_unique_constraint",
+            PlanOp::DropUniqueConstraint { .. } => "drop_unique_constraint",
         }
     }
 
     pub fn is_destructive(&self) -> bool {
-        matches!(self, PlanOp::DropColumn { .. } | PlanOp::RenameColumn { .. })
+        matches!(
+            self,
+            PlanOp::DropColumn { .. }
+                | PlanOp::RenameColumn { .. }
+                | PlanOp::DropUniqueConstraint { .. }
+        )
     }
 
     /// User-facing dry-run description.
@@ -190,6 +210,12 @@ impl PlanOp {
             PlanOp::DropColumn { table, column } => {
                 format!("drop column {column} from {table}")
             }
+            PlanOp::AddUniqueConstraint { table, columns } => {
+                format!("add unique constraint ({}) on {table}", columns.join(", "))
+            }
+            PlanOp::DropUniqueConstraint { table, columns } => {
+                format!("drop unique constraint ({}) on {table}", columns.join(", "))
+            }
         }
     }
 
@@ -203,7 +229,9 @@ impl PlanOp {
             | PlanOp::SetSearchKey { table, .. }
             | PlanOp::SetSingleton { table, .. }
             | PlanOp::RenameColumn { table, .. }
-            | PlanOp::DropColumn { table, .. } => table,
+            | PlanOp::DropColumn { table, .. }
+            | PlanOp::AddUniqueConstraint { table, .. }
+            | PlanOp::DropUniqueConstraint { table, .. } => table,
         }
     }
 }

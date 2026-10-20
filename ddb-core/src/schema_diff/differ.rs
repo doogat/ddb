@@ -99,6 +99,46 @@ fn diff_type(
     diff_columns(desired, current, renames, plan);
     diff_dropped_columns(desired, current, renames, plan);
     diff_type_attributes(desired, current, plan);
+    diff_unique_together(desired, current, plan);
+}
+
+/// Drop each live unique constraint absent from `desired` and add each desired
+/// one absent from `current`. Constraints compare as column sets: column order
+/// and list order are not changes.
+fn diff_unique_together(desired: &TableSchema, current: &TableSchema, plan: &mut SchemaPlan) {
+    let table = &desired.table_name;
+    let desired_uc = unique_constraints(desired);
+    let current_uc = unique_constraints(current);
+    for (key, columns) in &current_uc {
+        if !desired_uc.iter().any(|(k, _)| k == key) {
+            plan.ops.push(PlanOp::DropUniqueConstraint {
+                table: table.clone(),
+                columns: columns.to_vec(),
+            });
+        }
+    }
+    for (key, columns) in &desired_uc {
+        if !current_uc.iter().any(|(k, _)| k == key) {
+            plan.ops.push(PlanOp::AddUniqueConstraint {
+                table: table.clone(),
+                columns: columns.to_vec(),
+            });
+        }
+    }
+}
+
+/// `t.unique_together` as `(sorted column set, declared columns)` pairs, empty
+/// constraints skipped and duplicate column sets kept once (first declaration).
+fn unique_constraints(t: &TableSchema) -> Vec<(Vec<&String>, &[String])> {
+    let mut out: Vec<(Vec<&String>, &[String])> = Vec::new();
+    for columns in t.unique_together.iter().flatten() {
+        let mut key: Vec<&String> = columns.iter().collect();
+        key.sort();
+        if !columns.is_empty() && !out.iter().any(|(k, _)| *k == key) {
+            out.push((key, columns));
+        }
+    }
+    out
 }
 
 /// Add-or-compare pass over every desired column (renamed targets skipped):
@@ -289,10 +329,6 @@ fn diff_type_attributes(desired: &TableSchema, current: &TableSchema, plan: &mut
     if desired.stale_after_days != current.stale_after_days {
         plan.unsupported
             .push(format!("type {table}: stale_after_days change is unsupported"));
-    }
-    if desired.unique_together != current.unique_together {
-        plan.unsupported
-            .push(format!("type {table}: unique_together change is unsupported"));
     }
 }
 
