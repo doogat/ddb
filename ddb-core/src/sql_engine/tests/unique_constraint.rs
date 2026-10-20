@@ -1,5 +1,6 @@
 // `ALTER TABLE <t> ADD UNIQUE (...)` / `DROP UNIQUE (...)` on existing types.
 use super::setup;
+use crate::error::{codes, DoogatError};
 use crate::git_ops::GitRepo;
 use crate::indexer::Index;
 use crate::sql_engine::{SqlEngine, SqlResult};
@@ -47,6 +48,21 @@ fn ok_message(result: SqlResult) -> String {
         panic!("expected Ok variant");
     };
     msg
+}
+
+fn code_of(err: &DoogatError) -> &'static str {
+    let DoogatError::Structured { code, .. } = err else {
+        panic!("expected Structured variant, got: {err:?}");
+    };
+    code
+}
+
+/// Asserts the rejected-ADD contract: structured UNIQUE_VIOLATION whose
+/// message names the duplicate data.
+fn assert_duplicate_rejection(err: &DoogatError) {
+    assert_eq!(code_of(err), codes::UNIQUE_VIOLATION, "err = {err:?}");
+    let msg = err.to_string();
+    assert!(msg.contains("duplicate"), "msg = {msg}");
 }
 
 const ABC: &str = "(title TEXT, a VARCHAR(255), b VARCHAR(255), c VARCHAR(255)";
@@ -113,14 +129,77 @@ fn add_unique_rejects_duplicate_rows_and_leaves_typedef_unchanged() {
     let err = engine
         .execute("ALTER TABLE t1 ADD UNIQUE (a, b)")
         .expect_err("ADD UNIQUE over duplicate rows must fail");
-    let msg = err.to_string();
-    assert!(msg.contains("duplicate"), "msg = {msg}");
+    assert_duplicate_rejection(&err);
     assert_eq!(constraints(&index, &repo, "t1"), cset(&[&["c"]]));
     assert_eq!(commit_count(dir.path()), before, "rejected ADD must not commit");
     // No enforcement was installed: another (A1, B1) row still inserts.
     engine
         .execute("INSERT INTO t1 (title, a, b, c) VALUES ('r3', 'A1', 'B1', 'C3')")
         .unwrap();
+}
+
+#[test]
+fn add_unique_duplicate_check_covers_whole_tuple_on_any_table() {
+    let (dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute(&format!("CREATE TABLE pairs {ABC})")).unwrap();
+    engine.execute(&format!("CREATE TABLE solo {ABC})")).unwrap();
+    // Rows share only the LAST named column: not duplicates for (a, b).
+    engine
+        .execute("INSERT INTO pairs (title, a, b, c) VALUES ('r1', 'A1', 'B1', 'C1')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO pairs (title, a, b, c) VALUES ('r2', 'A2', 'B1', 'C2')")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE pairs ADD UNIQUE (a, b)")
+        .expect("rows differing on `a` are not duplicates for (a, b)");
+    assert_eq!(constraints(&index, &repo, "pairs"), cset(&[&["a", "b"]]));
+    // Single-column duplicates on another table must be caught too.
+    engine
+        .execute("INSERT INTO solo (title, a, b, c) VALUES ('s1', 'A1', 'B1', 'C1')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO solo (title, a, b, c) VALUES ('s2', 'A2', 'B2', 'C1')")
+        .unwrap();
+    let before = commit_count(dir.path());
+    let err = engine
+        .execute("ALTER TABLE solo ADD UNIQUE (c)")
+        .expect_err("ADD UNIQUE (c) over duplicate `c` values must fail");
+    assert_duplicate_rejection(&err);
+    assert!(constraints(&index, &repo, "solo").is_empty());
+    assert_eq!(commit_count(dir.path()), before, "rejected ADD must not commit");
+}
+
+#[test]
+fn add_unique_rejects_column_missing_from_typedef() {
+    let (dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute(&format!("CREATE TABLE t1 {ABC}, UNIQUE(c))")).unwrap();
+    // Same statement shape over real columns succeeds, so the failure below
+    // is about the unknown column, not the syntax.
+    engine.execute("ALTER TABLE t1 ADD UNIQUE (a)").unwrap();
+    let before = commit_count(dir.path());
+    let err = engine
+        .execute("ALTER TABLE t1 ADD UNIQUE (a, nosuch)")
+        .expect_err("unknown column must be an error");
+    assert!(err.to_string().contains("nosuch"), "err must name the column: {err}");
+    assert_eq!(constraints(&index, &repo, "t1"), cset(&[&["c"], &["a"]]));
+    assert_eq!(commit_count(dir.path()), before, "rejected ADD must not commit");
+}
+
+#[test]
+fn add_unique_matches_column_names_case_insensitively() {
+    let (dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute(&format!("CREATE TABLE t1 {ABC})")).unwrap();
+    engine.execute("ALTER TABLE t1 ADD UNIQUE (A, B)").unwrap();
+    assert_eq!(constraints(&index, &repo, "t1"), cset(&[&["a", "b"]]));
+    let before = commit_count(dir.path());
+    let msg = ok_message(engine.execute("ALTER TABLE t1 ADD UNIQUE (a, b)").unwrap());
+    assert!(msg.contains("already present"), "msg = {msg}");
+    assert_eq!(commit_count(dir.path()), before, "no-op re-apply must not commit");
+    assert_eq!(constraints(&index, &repo, "t1"), cset(&[&["a", "b"]]));
 }
 
 #[test]
@@ -139,6 +218,13 @@ fn add_unique_is_idempotent_regardless_of_column_order() {
     assert_eq!(
         constraints(&index, &repo, "t1"),
         cset(&[&["a", "b"], &["a"]])
+    );
+    // Same column count as (a, b) but disjoint columns: also a new constraint.
+    let msg = ok_message(engine.execute("ALTER TABLE t1 ADD UNIQUE (c, title)").unwrap());
+    assert!(!msg.contains("already present"), "msg = {msg}");
+    assert_eq!(
+        constraints(&index, &repo, "t1"),
+        cset(&[&["a", "b"], &["a"], &["c", "title"]])
     );
 }
 
@@ -169,7 +255,7 @@ fn drop_unique_removes_only_named_constraint_and_its_enforcement() {
     let (dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
     engine
-        .execute(&format!("CREATE TABLE t1 {ABC}, UNIQUE(a, b), UNIQUE(c))"))
+        .execute(&format!("CREATE TABLE t1 {ABC}, UNIQUE(a, b), UNIQUE(b, c))"))
         .unwrap();
     engine
         .execute("INSERT INTO t1 (title, a, b, c) VALUES ('r1', 'A1', 'B1', 'C1')")
@@ -178,13 +264,14 @@ fn drop_unique_removes_only_named_constraint_and_its_enforcement() {
     // Reversed column order versus how the constraint was stored.
     let msg = ok_message(engine.execute("ALTER TABLE t1 DROP UNIQUE (b, a)").unwrap());
     assert!(!msg.contains("already"), "real drop must not report no-op: {msg}");
-    assert_eq!(constraints(&index, &repo, "t1"), cset(&[&["c"]]));
+    // The other two-column constraint survives.
+    assert_eq!(constraints(&index, &repo, "t1"), cset(&[&["b", "c"]]));
     assert_eq!(commit_count(dir.path()), before + 1);
     engine
         .execute("INSERT INTO t1 (title, a, b, c) VALUES ('r2', 'A1', 'B1', 'C2')")
         .expect("(a, b) duplicate must succeed once the constraint is dropped");
-    let dup_c = engine.execute("INSERT INTO t1 (title, a, b, c) VALUES ('r3', 'A9', 'B9', 'C1')");
-    assert!(dup_c.is_err(), "UNIQUE(c) must still be enforced: {dup_c:?}");
+    let dup_bc = engine.execute("INSERT INTO t1 (title, a, b, c) VALUES ('r3', 'A9', 'B1', 'C1')");
+    assert!(dup_bc.is_err(), "UNIQUE(b, c) must still be enforced: {dup_bc:?}");
 }
 
 #[test]
@@ -199,6 +286,9 @@ fn drop_unique_is_idempotent_when_constraint_absent() {
     let before = commit_count(dir.path());
     // `(a)` is a subset of the stored `(a, b)`, not the same constraint.
     let msg = ok_message(engine.execute("ALTER TABLE t1 DROP UNIQUE (a)").unwrap());
+    assert!(msg.contains("already absent"), "msg = {msg}");
+    // Same column count as (a, b), different columns: not the same constraint.
+    let msg = ok_message(engine.execute("ALTER TABLE t1 DROP UNIQUE (a, c)").unwrap());
     assert!(msg.contains("already absent"), "msg = {msg}");
     let msg = ok_message(engine.execute("ALTER TABLE t2 DROP UNIQUE (a, b)").unwrap());
     assert!(msg.contains("already absent"), "msg = {msg}");
