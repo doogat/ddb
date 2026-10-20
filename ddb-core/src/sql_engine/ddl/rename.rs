@@ -282,6 +282,16 @@ impl<'a> SqlEngine<'a> {
             // content we just buffered, not a fresh git read (the writes are not
             // committed yet, so a git read would be buffer-blind).
             self.reindex_rename_from_buffer(typedef_path, &files)?;
+            // Record the rename so a later op in the same plan (e.g. a
+            // unique-constraint duplicate check) can resolve the renamed
+            // column back to its still-live old name (PRD 00184 task 8).
+            if let Some(ref mut buf) = self.txn {
+                buf.column_renames.push((
+                    table_name.to_string(),
+                    old_name.to_string(),
+                    new_name.to_string(),
+                ));
+            }
             // `rematerialize_type` reads typedef + rows from git, so it would be
             // blind to the buffered writes — defer it to COMMIT, after the flush.
             self.rematerialize_or_defer(table_name)?;

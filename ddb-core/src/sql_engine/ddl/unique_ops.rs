@@ -29,6 +29,32 @@ impl<'a> SqlEngine<'a> {
             .unwrap_or_default()
     }
 
+    /// Resolve `desired_col` to the name it must be queried under on the
+    /// LIVE materialized table right now: itself when already live, or its
+    /// pre-rename name when a `RenameColumn` buffered earlier in this same
+    /// transaction renamed it here (`rematerialize_or_defer` defers the
+    /// rebuild to commit, so the live table still carries the old name) --
+    /// `None` only when the column is genuinely new and holds no live data
+    /// under any name (PRD 00184 task 8; task 6 is the `None` case alone).
+    fn live_probe_column(
+        &self,
+        table_name: &str,
+        desired_col: &str,
+        live_columns: &[String],
+    ) -> Option<String> {
+        if live_columns.iter().any(|lc| lc.eq_ignore_ascii_case(desired_col)) {
+            return Some(desired_col.to_string());
+        }
+        let old_name = self.txn.as_ref()?.column_renames.iter().find_map(|(t, old, new)| {
+            (t.eq_ignore_ascii_case(table_name) && new.eq_ignore_ascii_case(desired_col))
+                .then(|| old.clone())
+        })?;
+        live_columns
+            .iter()
+            .any(|lc| lc.eq_ignore_ascii_case(&old_name))
+            .then_some(old_name)
+    }
+
     pub(in crate::sql_engine) fn handle_add_unique_constraint(
         &mut self,
         table_name: &str,
@@ -48,41 +74,47 @@ impl<'a> SqlEngine<'a> {
                 "unique constraint ({cols}) already present on {table_name}"
             )));
         }
-        let quoted: Vec<String> = columns.iter().map(|c| format!("\"{c}\"")).collect();
-        let group_by = quoted.join(", ");
-        let not_null = quoted
-            .iter()
-            .map(|c| format!("{c} IS NOT NULL"))
-            .collect::<Vec<_>>()
-            .join(" AND ");
         // A column added earlier in the same ALTER sequence may still be
         // buffered: `rematerialize_or_defer` (ddl/alter.rs) pushes the table
         // onto the pending-rematerialize list inside a transaction rather
         // than rebuilding it immediately, so the live materialized table may
-        // not have the column yet. Querying it would fail with "no such
-        // column"; a column with no rows yet cannot hold a duplicate, so
-        // skip the check for it. Skipping is all-or-nothing for a composite
-        // key: a `unique_together` mixing an already-materialized column
-        // with a pending one skips the dup check for the whole tuple, so an
-        // existing duplicate on the materialized column alone is caught only
-        // later, by the real UNIQUE INDEX at commit-time rematerialize (a
-        // raw SQLite error there, not this handler's friendly message) --
-        // deliberately deferred, since that path cannot lose or persist
-        // duplicate data silently.
+        // not have the column yet under this name. A genuinely new column
+        // (task 6) holds no live data under any name and is skipped. A
+        // RENAMED column (task 8) still holds its pre-existing data, live
+        // under its OLD name -- `live_probe_column` resolves it there so the
+        // duplicate check still runs against real data instead of treating
+        // the rename as data-free. Skipping is all-or-nothing for a
+        // composite key: a `unique_together` mixing a resolvable column with
+        // a genuinely new, unresolvable one skips the dup check for the
+        // whole tuple, so an existing duplicate on the resolvable column
+        // alone is caught only later, by the real UNIQUE INDEX at
+        // commit-time rematerialize (a raw SQLite error there, not this
+        // handler's friendly message) -- deliberately deferred, since that
+        // path cannot lose or persist duplicate data silently.
         let live_columns = self.live_table_columns(table_name);
-        let pending_rematerialize = columns
+        let probe_columns: Option<Vec<String>> = columns
             .iter()
-            .any(|c| !live_columns.iter().any(|lc| lc.eq_ignore_ascii_case(c)));
-        let dup_count: i64 = if pending_rematerialize {
-            0
-        } else {
-            self.index.sql_conn().query_row(
-                &format!(
-                    "SELECT COUNT(*) FROM (SELECT 1 FROM \"{table_name}\" WHERE {not_null} GROUP BY {group_by} HAVING COUNT(*) > 1)"
-                ),
-                [],
-                |row| row.get(0),
-            )?
+            .map(|c| self.live_probe_column(table_name, c, &live_columns))
+            .collect();
+        let dup_count: i64 = match probe_columns {
+            None => 0,
+            Some(probe_columns) => {
+                let probe_quoted: Vec<String> =
+                    probe_columns.iter().map(|c| format!("\"{c}\"")).collect();
+                let group_by = probe_quoted.join(", ");
+                let not_null = probe_quoted
+                    .iter()
+                    .map(|c| format!("{c} IS NOT NULL"))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                self.index.sql_conn().query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM (SELECT 1 FROM \"{table_name}\" WHERE {not_null} GROUP BY {group_by} HAVING COUNT(*) > 1)"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )?
+            }
         };
         if dup_count > 0 {
             return Err(DoogatError::Structured {

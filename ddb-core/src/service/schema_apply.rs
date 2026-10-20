@@ -1091,6 +1091,156 @@ types:
     unique_together: [[code]]
 ";
 
+    /// Desired-schema YAML that, applied over `WIDGET_UNIQUE_LABEL`, renames
+    /// the constrained column `label` -> `caption` AND keeps a
+    /// `unique_together` over the renamed column, in one apply. The differ
+    /// compares `unique_together` by column NAME set, so renaming the
+    /// constrained column makes the desired and current constraint sets
+    /// disjoint (`[caption]` vs `[label]`): the differ emits BOTH a
+    /// `DropUniqueConstraint([label])` and an `AddUniqueConstraint([caption])`,
+    /// after the `RenameColumn` that `apply_renames` already queued first.
+    const WIDGET_RENAME_LABEL_TO_CAPTION_KEEP_UNIQUE: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: caption
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+        rename_from: label
+    unique_together: [[caption]]
+";
+
+    #[test]
+    fn apply_renames_unique_constrained_column_and_keeps_constraint_in_one_apply() {
+        // Regression (PRD 00184 task 8, BOB): the documented planner
+        // postpones a RenameColumn's rematerialize to commit, while
+        // AddUniqueConstraint validates its destination column against the
+        // BUFFERED typedef immediately. Renaming a unique-constrained column
+        // and re-declaring the constraint under the new name, in one apply,
+        // must converge, preserve the pre-existing row, commit as ONE
+        // commit, and still enforce uniqueness on the renamed column
+        // afterward.
+        use crate::traits::GitHistory;
+
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('alpha')")
+            .unwrap();
+        svc.apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .unwrap();
+
+        let head_before = svc.repo.head_oid().unwrap().0;
+        let report = svc
+            .apply_schema(cmd(WIDGET_RENAME_LABEL_TO_CAPTION_KEEP_UNIQUE, false, true))
+            .expect(
+                "renaming a unique-constrained column and keeping the constraint must converge, not fail mid-plan",
+            );
+        assert!(
+            report.value.applied,
+            "the rename-plus-reconstrain apply must apply"
+        );
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "rename_column" && op.table == "widget"),
+            "the plan must contain a rename_column op, got: {:?}",
+            report.value.ops
+        );
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "add_unique_constraint" && op.table == "widget"),
+            "the plan must contain an add_unique_constraint op, got: {:?}",
+            report.value.ops
+        );
+
+        // One commit: rename + drop/add unique constraint flush atomically.
+        let head_after = svc.repo.head_oid().unwrap().0;
+        assert_ne!(head_before, head_after, "a non-empty apply must advance HEAD");
+        let parent = svc.repo.commit_parent_oid(&head_after, 0).unwrap();
+        assert_eq!(
+            parent, head_before,
+            "the rename-plus-reconstrain apply must flush as ONE commit"
+        );
+
+        // The pre-existing row survives the rename, under the new name.
+        match svc
+            .execute_sql("SELECT caption FROM widget")
+            .expect("querying widget by its new column name must succeed")
+        {
+            crate::sql_engine::SqlResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["alpha".to_string()]],
+                    "the pre-existing row must survive the rename intact, got: {rows:?}"
+                );
+            }
+            other => panic!("expected Rows from a SELECT, got: {other:?}"),
+        }
+
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must exist after the apply");
+        assert_eq!(
+            schema.unique_together,
+            Some(vec![vec!["caption".to_string()]]),
+            "typedef must record the constraint under the renamed column"
+        );
+
+        // The constraint is enforced on the renamed column afterward.
+        assert!(
+            svc.execute_sql("INSERT INTO widget (caption) VALUES ('alpha')")
+                .is_err(),
+            "the live unique index must reject a duplicate `caption` after the rename"
+        );
+    }
+
+    #[test]
+    fn apply_rename_with_unique_over_existing_duplicate_data_still_rejects() {
+        // Companion to the convergence test above: renaming a column into a
+        // unique_together re-add must NOT let a pre-existing duplicate slip
+        // through just because the rename defers rematerialize (the same
+        // live-column-absent signal task 6's fix reads to skip the
+        // duplicate-check SELECT for a brand-new column). Two existing rows
+        // share `label='dup'` BEFORE the rename; the renamed-and-reconstrained
+        // apply must still error, not silently accept the duplicate.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('dup')")
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('dup')")
+            .unwrap();
+
+        let err = svc
+            .apply_schema(cmd(WIDGET_RENAME_LABEL_TO_CAPTION_KEEP_UNIQUE, false, true))
+            .expect_err(
+                "renaming a column with pre-existing duplicate data into a unique_together re-add must error",
+            );
+        match err {
+            crate::error::DoogatError::Structured { code, .. } => {
+                assert_eq!(code, crate::error::codes::SCHEMA_APPLY_PARTIAL);
+            }
+            other => panic!("expected Structured SCHEMA_APPLY_PARTIAL, got: {other:?}"),
+        }
+
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must still exist after a failed apply");
+        assert_eq!(
+            schema.unique_together, None,
+            "a failed apply must not partially record the constraint"
+        );
+    }
+
     #[test]
     fn apply_adds_column_and_unique_together_over_it_in_one_apply() {
         // Regression (PRD 00184 task 6, ALICE): AddColumn only buffers the

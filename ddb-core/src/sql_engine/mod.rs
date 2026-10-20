@@ -67,6 +67,15 @@ pub struct TransactionBuffer {
     /// rematerializes each listed type against the now-committed state.
     /// Order-preserving and deduped on insert.
     pub rematerialize: Vec<String>,
+    /// `(table, old_name, new_name)` for each `RenameColumn` buffered while
+    /// this transaction is open (PRD 00184 task 8). The live materialized
+    /// table still carries `old_name` until `rematerialize_type` runs at
+    /// commit, so a later op in the same plan that needs to read existing
+    /// values under the renamed column (e.g. a unique-constraint duplicate
+    /// check) must resolve back through this map instead of either
+    /// querying a column that does not exist yet, or wrongly treating the
+    /// renamed column as brand-new, data-free, and dup-check-exempt.
+    pub column_renames: Vec<(String, String, String)>,
 }
 
 pub struct SqlEngine<'a> {
