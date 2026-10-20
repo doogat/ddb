@@ -1098,7 +1098,12 @@ ddb-server/src/
 │   └── reload_signal.rs # ReloadIntent/ReloadSignal
 ├── schema/          # Dynamic GraphQL schema
 │   ├── mod.rs       # Schema builder (query, mutation, subscription)
-│   ├── base_types.rs # Value converters, type builders, helpers
+│   ├── base_types/  # Value converters, type builders, helpers (directory module)
+│   │   ├── mod.rs           # Entry point
+│   │   ├── to_gql.rs        # Value-to-GraphQL conversion
+│   │   ├── naming.rs        # Field/type naming
+│   │   ├── schema_object.rs # Object type builders
+│   │   └── validation.rs    # Input validation
 │   ├── queries.rs   # Query field resolvers
 │   ├── mutations/   # Mutation field resolvers (directory module)
 │   │   ├── mod.rs        # build_mutation_fields + MutationOutput assembly
@@ -1110,7 +1115,13 @@ ddb-server/src/
 │   ├── input.rs     # Shared GraphQL input decoding helpers (create/update/batch)
 │   └── discovery_queries.rs # Discovery query resolvers
 ├── read_pool.rs     # Semaphore-gated concurrent read dispatch (spawn_blocking)
-├── filter.rs        # Filter/sort/aggregate: input types, SQL builders, Connection wrapper
+├── filter/          # Filter/sort/aggregate: input types, SQL builders, Connection wrapper (directory module)
+│   ├── mod.rs            # Entry point
+│   ├── where_build.rs    # WHERE clause building
+│   ├── scalars.rs        # Scalar filter operators
+│   ├── aggregates.rs     # Aggregate filters
+│   ├── junction.rs       # Junction table filters
+│   └── reverse.rs        # Reverse-relation filters
 ├── events.rs        # DoogatEvent, EventKind, EventBus (broadcast channel)
 ├── ws.rs            # WebSocket upgrade handler for graphql-ws subscriptions
 ├── pgwire.rs        # PostgreSQL wire protocol (simple query, MD5 auth, SELECT + DML/DDL routing)

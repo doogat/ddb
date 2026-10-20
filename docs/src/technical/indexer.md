@@ -1,6 +1,6 @@
 # Search Index
 
-**Source**: `ddb-core/src/indexer/` (directory module: mod.rs, filter.rs, graph.rs, materialize.rs, rebuild.rs, resolve.rs, search.rs)
+**Source**: `ddb-core/src/indexer/` (directory module: mod.rs, filter.rs, cascade.rs, rebuild.rs, resolve.rs, graph/, materialize/, search/)
 
 SQLite-based search index with FTS5 full-text search, type inference, schema merging, and table materialization. The index is a derived cache — always rebuildable from the Git repository. No schema migration framework is needed: on full rebuild, all tables are dropped and recreated from the current schema definitions.
 
@@ -209,7 +209,7 @@ Cascade-delete preflight lives in `indexer/cascade.rs`: schema loading, required
 
 ### populate_junction_tables / sync_junction_tables_for_columns
 
-`Index::populate_junction_tables(schema, id, doogat)` and `Index::sync_junction_tables_for_columns(schema, id, doogat, changed_cols)` are the two entry points that keep auto-junction `{type}_{ref_col}` tables aligned with a single doogat's REFERENCES values. Both used to be private helpers reachable only from `materialize_single` / `materialize_row`. PRD 00134 promoted them to `pub(crate)` (and exposed them on the `SqlBackend` trait) so the SQL `INSERT` and `UPDATE` paths in `ddb-core/src/sql_engine/dml.rs` share the same implementation as the full-rebuild path. See [`sql-engine.md`](sql-engine.md#auto-junction-sync-on-typed-insert-and-update-prd-00134) for the SQL-side wiring.
+`Index::populate_junction_tables(schema, id, doogat)` and `Index::sync_junction_tables_for_columns(schema, id, doogat, changed_cols)` are the two entry points that keep auto-junction `{type}_{ref_col}` tables aligned with a single doogat's REFERENCES values. Both used to be private helpers reachable only from `materialize_single` / `materialize_row`. PRD 00134 promoted them to `pub(crate)` (and exposed them on the `SqlBackend` trait) so the SQL `INSERT` and `UPDATE` paths in `ddb-core/src/sql_engine/dml/` share the same implementation as the full-rebuild path. See [`sql-engine.md`](sql-engine.md#auto-junction-sync-on-typed-insert-and-update-prd-00134) for the SQL-side wiring.
 
 Both helpers read REFERENCES values via `extract_multi_reference_values`, which filters empty / whitespace-only entries before the junction `INSERT`. This means `SET col = NULL` (SQL UPDATE) and `unsetFields: ["col"]` (service-path UPDATE) clear the auto-junction row cleanly: both paths end up writing `- col:: [[]]` to the reference zone, the filter strips that empty entry, and no ghost `<col>_id = ''` row lands in `{type}_{col}`.
 

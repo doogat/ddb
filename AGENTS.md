@@ -17,7 +17,7 @@ Hybrid Git-CRDT decentralized database. Git is source of truth; SQLite index is 
 ddb-core/src/        Library crate: parser/ (three-zone Markdown), git_ops/ (repo CRUD, merge,
                      remote, rename), indexer/ (SQLite FTS5, ports), service/ (DoogatService,
                      per-verb submodules), sql_engine/, sync_manager/, compaction/, consistency/,
-                     crdt_resolver.rs, hlc.rs, traits.rs (core trait abstractions),
+                     crdt_resolver/ (Automerge conflict resolution), hlc.rs, traits.rs (core trait abstractions),
                      ffi/ (UniFFI DoogatDriver facade), types/ (adapter-neutral shared types)
 ddb-core/benches/    Criterion benchmarks (CRUD + search at 1K doogats)
 ddb-uniffi-bindgen/  UniFFI bindgen binary (isolated from ddb-core)

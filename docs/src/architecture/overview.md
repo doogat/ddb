@@ -141,7 +141,12 @@ ddb/
 │   │   ├── hlc.rs              # Hybrid Logical Clock
 │   │   ├── parser/             # Markdown parsing/serialization
 │   │   ├── git_ops/            # Git repository operations
-│   │   ├── crdt_resolver.rs    # Automerge conflict resolution
+│   │   ├── crdt_resolver/      # Automerge conflict resolution
+│   │   │   ├── mod.rs          # Entry point, trait impl
+│   │   │   ├── frontmatter.rs  # Frontmatter resolution
+│   │   │   ├── body.rs         # Body merge
+│   │   │   ├── append_log.rs   # Append-log merge
+│   │   │   └── lww.rs          # Last-writer-wins
 │   │   ├── indexer/            # SQLite FTS5 index + type inference
 │   │   ├── sql_engine/         # SQL DDL/DML translation
 │   │   ├── search_query.rs     # Search query parsing/normalization
@@ -182,7 +187,12 @@ ddb/
 │       │   └── reload_signal.rs # ReloadIntent/ReloadSignal
 │       ├── schema/             # Dynamic GraphQL schema
 │       │   ├── mod.rs          # Schema builder
-│       │   ├── base_types.rs   # Value converters, type builders
+│       │   ├── base_types/     # Value converters, type builders (directory module)
+│       │   │   ├── mod.rs          # Entry point
+│       │   │   ├── to_gql.rs       # Value-to-GraphQL conversion
+│       │   │   ├── naming.rs       # Field/type naming
+│       │   │   ├── schema_object.rs # Object type builders
+│       │   │   └── validation.rs   # Input validation
 │       │   ├── queries.rs      # Query field resolvers
 │       │   ├── mutations/      # Mutation field resolvers (directory module)
 │       │   │   ├── mod.rs          # build_mutation_fields + MutationOutput
@@ -200,7 +210,13 @@ ddb/
 │       ├── pgwire.rs           # PostgreSQL wire protocol
 │       ├── ws.rs               # WebSocket transport
 │       ├── events.rs           # Event bus for subscriptions
-│       ├── filter.rs           # GraphQL filter implementation
+│       ├── filter/             # GraphQL filter implementation (directory module)
+│       │   ├── mod.rs              # Entry point
+│       │   ├── where_build.rs      # WHERE clause building
+│       │   ├── scalars.rs          # Scalar filter operators
+│       │   ├── aggregates.rs       # Aggregate filters
+│       │   ├── junction.rs         # Junction table filters
+│       │   └── reverse.rs          # Reverse-relation filters
 │       ├── reload.rs           # Hot schema reload
 │       ├── maintenance.rs      # Server maintenance routes
 │       └── nosql_api.rs        # NoSQL API endpoints

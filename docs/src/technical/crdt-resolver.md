@@ -1,6 +1,6 @@
 # CRDT Conflict Resolution
 
-**Source**: `ddb-core/src/crdt_resolver.rs` (487 lines)
+**Source**: `ddb-core/src/crdt_resolver/` (directory module: mod.rs, frontmatter.rs, body.rs, append_log.rs, lww.rs)
 
 When Git detects a merge conflict, this module resolves it using Automerge CRDT with per-zone strategies.
 
@@ -217,7 +217,7 @@ This means two deletion scenarios resolve differently, and they should not be co
 ## SINGLETON post-sync sweep
 
 SINGLETON conflict handling finishes **after** git/CRDT merge, not inside
-`crdt_resolver.rs`. The implementation lives in
+`crdt_resolver/`. The implementation lives in
 `ddb-core/src/consistency/singleton_sweep.rs` and runs from
 `SyncManager::finalize_sync()` after `update_sync_state()` and before `push()`.
 

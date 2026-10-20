@@ -549,7 +549,7 @@ Internal tables (`doogats`, `_ddb_tags`, `_ddb_fts`, `_ddb_links`, etc.) are hid
 
 ## Constraint enforcement
 
-The SQL write path validates declared constraints before any side effects. Validation runs in `validate_row_against_schema` (see `ddb-core/src/sql_engine/dml.rs`) after `fill_defaults_and_validate` and before `build_and_index_row`, so a rejected write never produces a row in the materialized table or the `doogats` index.
+The SQL write path validates declared constraints before any side effects. Validation runs in `validate_row_against_schema` (see `ddb-core/src/sql_engine/dml/validate.rs`) after `fill_defaults_and_validate` and before `build_and_index_row`, so a rejected write never produces a row in the materialized table or the `doogats` index.
 
 ### Enforcement matrix
 
@@ -584,7 +584,7 @@ Through the GraphQL surface, these surface as `errors[].message` with `extension
 
 Before PRD 00122, declaring `title VARCHAR(255) NOT NULL` in `CREATE TABLE` was silently dropped — `extract_columns` skipped it because `title` is also stored in `meta.title`. The constraints went nowhere.
 
-`title` is now retained in `schema.columns` with all its declared constraints. The materialized-row writer and the GraphQL schema builder skip core columns explicitly (`is_core_column` in `ddb-core/src/indexer/materialize.rs`) so the field still lives only in `meta.title`, but the validator sees its `required` flag and length cap.
+`title` is now retained in `schema.columns` with all its declared constraints. The materialized-row writer and the GraphQL schema builder skip core columns explicitly (`is_core_column` in `ddb-core/src/indexer/materialize/mod.rs`) so the field still lives only in `meta.title`, but the validator sees its `required` flag and length cap.
 
 ### Reserved columns
 
@@ -608,12 +608,12 @@ Priorities 3 and 4 silently coerced unrelated fields like `url` or `description`
 
 ### REFERENCES-aware title_template (PRD 00127)
 
-A `title_template` placeholder of the form `{col.field}` dereferences a `REFERENCES` column and pulls `field` off the target doogat. The column list in `parse_title_template` (ddb-core/src/sql_engine/helpers.rs) is reused by both the validator and the INSERT/UPDATE resolvers.
+A `title_template` placeholder of the form `{col.field}` dereferences a `REFERENCES` column and pulls `field` off the target doogat. The column list in `parse_title_template` (ddb-core/src/sql_engine/helpers/template.rs) is reused by both the validator and the INSERT/UPDATE resolvers.
 
 - Parsing rejects multi-hop paths (`{a.b.c}`) and malformed identifiers.
 - `handle_title_template` validates dotted paths against the current schema (column exists, is `REFERENCES`) and against the target type's schema (field exists). `title` is accepted on any reference.
-- `resolve_insert_title` (builders.rs) runs a `SELECT "field" FROM "target_type" WHERE id = ?1` per dotted placeholder, guarded by `pragma_table_info` to avoid SQLite's legacy double-quoted-string fallback. Missing target or NULL field renders empty.
-- `recompute_template_title` (builders.rs) runs on `UPDATE` when the SET list touches any template-referenced column and no explicit `title` was supplied. It merges the updated values with the current materialized row and re-renders the template.
+- `resolve_insert_title` (builders/data_doogat.rs) runs a `SELECT "field" FROM "target_type" WHERE id = ?1` per dotted placeholder, guarded by `pragma_table_info` to avoid SQLite's legacy double-quoted-string fallback. Missing target or NULL field renders empty.
+- `recompute_template_title` (builders/data_doogat.rs) runs on `UPDATE` when the SET list touches any template-referenced column and no explicit `title` was supplied. It merges the updated values with the current materialized row and re-renders the template.
 - Cascading re-title when the **target** doogat's field changes is out of scope. Consumers can fall back to `ddb fix` or an explicit `UPDATE` to repair stale junction titles.
 
 ### Limitations
@@ -622,7 +622,7 @@ A `title_template` placeholder of the form `{col.field}` dereferences a `REFEREN
 
 ### Expression-synthesized NULL
 
-`COALESCE(NULL, NULL)`, `IFNULL(NULL, NULL)`, `NULLIF(x, x)`, subqueries returning NULL, and other expression forms that resolve to SQL NULL **are** treated as NULL by the validator. The eval pipeline (`eval_values_nullable` in helpers.rs) preserves NULL through the round-trip and the validator rejects them on `NOT NULL` columns the same way it rejects bare `NULL` literals. Legitimate uses like `IFNULL(NULL, 42)` or `COALESCE(NULL, 'fallback')` resolve to non-NULL and pass validation as expected.
+`COALESCE(NULL, NULL)`, `IFNULL(NULL, NULL)`, `NULLIF(x, x)`, subqueries returning NULL, and other expression forms that resolve to SQL NULL **are** treated as NULL by the validator. The eval pipeline (`eval_values_nullable` in helpers/eval.rs) preserves NULL through the round-trip and the validator rejects them on `NOT NULL` columns the same way it rejects bare `NULL` literals. Legitimate uses like `IFNULL(NULL, 42)` or `COALESCE(NULL, 'fallback')` resolve to non-NULL and pass validation as expected.
 
 ## Test Coverage
 
