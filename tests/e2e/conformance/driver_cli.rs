@@ -71,13 +71,19 @@ impl CliDriver {
 
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let value = match step.op {
-            StepOp::CreateDoogat | StepOp::ReadDoogat | StepOp::ListDoogats | StepOp::Search => {
-                ConformanceValue::String(stdout)
+            StepOp::CreateDoogat
+            | StepOp::ReadDoogat
+            | StepOp::ListDoogats
+            | StepOp::Search
+            // `schema apply` prints "no changes" on a no-op or one line per
+            // planned op ("<kind> <table> destructive=<bool> -- ... -- ...",
+            // ddb-cli/src/commands/schema.rs), carrying this driver's half
+            // of the applied/op-kind parity the GraphQL driver's `applied`/
+            // `ops` fields now carry too (PRD 00184 task 7, BLAKE/BOB).
+            | StepOp::SchemaApply => ConformanceValue::String(stdout),
+            StepOp::UpdateDoogat | StepOp::DeleteDoogat | StepOp::ExecuteSql => {
+                ConformanceValue::Null
             }
-            StepOp::UpdateDoogat
-            | StepOp::DeleteDoogat
-            | StepOp::ExecuteSql
-            | StepOp::SchemaApply => ConformanceValue::Null,
         };
 
         ConformanceResult::Ok {

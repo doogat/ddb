@@ -763,6 +763,62 @@ fn apply_schema_reapplying_converged_doc_is_noop() {
     );
 }
 
+const APPLY_WIDGET_UNIQUE_LABEL: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+    unique_together: [[label]]
+";
+
+/// Regression (PRD 00184 task 7, BLAKE): the FFI tests had no case at all
+/// exercising `apply_schema` with `unique_together` -- every other
+/// transport (CLI, GraphQL via `index_evolution_migration`) had one.
+/// Mirrors `schema_apply::tests::apply_adds_unique_together_to_existing_type_and_enforces_it`
+/// through the `DoogatDriver` facade: adding a `unique_together` to an
+/// existing type migrates the live table, and the constraint is actually
+/// enforced afterward -- not just recorded in the typedef.
+#[test]
+fn apply_schema_adds_unique_together_to_existing_type_and_enforces_it() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), false, false)
+        .expect("creating widget should succeed");
+    driver
+        .execute_sql("INSERT INTO widget (label) VALUES ('alpha')".into())
+        .expect("seeding one row should succeed");
+
+    let report = driver
+        .apply_schema(APPLY_WIDGET_UNIQUE_LABEL.into(), false, false)
+        .expect("adding a unique_together to an existing type must succeed, not fail mid-plan");
+    assert!(
+        report.applied,
+        "adding a unique_together must apply"
+    );
+    assert!(
+        report
+            .ops
+            .iter()
+            .any(|op| op.kind == "add_unique_constraint" && op.table == "widget"),
+        "the plan must contain an add_unique_constraint op, got: {:?}",
+        report.ops
+    );
+
+    // The constraint is enforced on the live materialized table through the
+    // FFI facade: a duplicate `label` insert must now be rejected.
+    assert!(
+        driver
+            .execute_sql("INSERT INTO widget (label) VALUES ('alpha')".into())
+            .is_err(),
+        "the live unique index must reject a duplicate `label` after the migration"
+    );
+}
+
 /// Adding a column to an existing type is non-destructive and applies WITHOUT
 /// allow_destructive: yields an `add_column` op and both columns become present.
 #[test]

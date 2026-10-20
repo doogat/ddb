@@ -346,7 +346,7 @@ impl GraphqlDriver {
         let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"mutation($schema: String!, $dryRun: Boolean, $allowDestructive: Boolean) {
-                    applySchema(schema: $schema, dryRun: $dryRun, allowDestructive: $allowDestructive) { applied }
+                    applySchema(schema: $schema, dryRun: $dryRun, allowDestructive: $allowDestructive) { applied ops { kind table } }
                 }"#,
                 "variables": {
                     "schema": schema,
@@ -362,8 +362,27 @@ impl GraphqlDriver {
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
+        // Carry `applied` and the op kinds through so fixtures can assert
+        // convergence (applied=false on a no-op re-apply) and which
+        // migration actually ran, instead of only a variant-level Ok/Err
+        // comparison (PRD 00184 task 7, BLAKE/BOB).
+        let applied = result["data"]["applySchema"]["applied"]
+            .as_bool()
+            .unwrap_or(false);
+        let ops = result["data"]["applySchema"]["ops"]
+            .as_array()
+            .map(|ops| {
+                ops.iter()
+                    .filter_map(|op| op["kind"].as_str())
+                    .map(|kind| ConformanceValue::String(kind.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("applied".to_string(), ConformanceValue::Bool(applied));
+        fields.insert("ops".to_string(), ConformanceValue::Array(ops));
         ConformanceResult::Ok {
-            value: ConformanceValue::Null,
+            value: ConformanceValue::Object(fields),
             warnings: vec![],
         }
     }

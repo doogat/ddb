@@ -286,11 +286,15 @@ pub fn warnings_shape_contract() -> WorkflowFixture {
 ///
 /// CREATE a type with no `unique_together`, apply a desired schema adding
 /// one (the migration must be reported, not a `SCHEMA_UNSUPPORTED_CHANGE`),
-/// then re-apply the identical desired schema and assert convergence to a
-/// no-op. Both steps run through the shared CRUD driver surface (CLI's
-/// `schema apply` / GraphQL's `applySchema` mutation) via the new
+/// re-apply the identical desired schema and assert convergence to a no-op,
+/// then DROP the constraint (destructive re-apply of the original
+/// no-constraint doc) -- the drop leg BLAKE's task-7 finding named as never
+/// exercised. Every step runs through the shared CRUD driver surface (CLI's
+/// `schema apply` / GraphQL's `applySchema` mutation) via
 /// `StepOp::SchemaApply`, exercised on both drivers by the same fixture per
-/// the repo's one-fixture-many-drivers pattern.
+/// the repo's one-fixture-many-drivers pattern. `cross_driver_schema_apply.rs`
+/// asserts `applied`/op-kind value parity per step (not just variant-level
+/// Ok/Err) and probes duplicate enforcement before and after the drop.
 pub fn index_evolution_migration() -> WorkflowFixture {
     const NO_CONSTRAINT: &str = "\
 types:
@@ -331,6 +335,94 @@ types:
             Step {
                 op: StepOp::SchemaApply,
                 args: serde_json::json!({"schema": WITH_CONSTRAINT}),
+            },
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": NO_CONSTRAINT, "allow_destructive": true}),
+            },
+        ],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![],
+            error: None,
+        },
+        interfaces: vec![InterfaceId::Cli, InterfaceId::Graphql],
+    }
+}
+
+/// PRD 00184 task 7 (BLAKE, BOB): a sibling of `index_evolution_migration`
+/// that probes what that fixture's "every step is Ok" assertion cannot --
+/// duplicate enforcement is ACTUALLY live after the migration (step 3 must
+/// error), and dropping the constraint ACTUALLY lifts it (step 5 must
+/// succeed, not merely report `drop_unique_constraint` in the plan). Kept
+/// separate from `index_evolution_migration` because its middle step is
+/// expected to fail, which would break that fixture's own all-succeed
+/// invariant.
+pub fn index_evolution_duplicate_enforcement_and_drop() -> WorkflowFixture {
+    const NO_CONSTRAINT: &str = "\
+types:
+  - name: ie_widget
+    columns:
+      - name: ie_label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+";
+    const WITH_CONSTRAINT: &str = "\
+types:
+  - name: ie_widget
+    columns:
+      - name: ie_label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+    unique_together: [[ie_label]]
+";
+    WorkflowFixture {
+        id: "index_evolution_duplicate_enforcement_and_drop".into(),
+        title: "unique_together rejects duplicates post-migration, drop lifts it".into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        steps: vec![
+            // 0: create the type with no constraint.
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": NO_CONSTRAINT}),
+            },
+            // 1: seed one row.
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({
+                    "sql": "INSERT INTO ie_widget (ie_label) VALUES ('dup-probe')"
+                }),
+            },
+            // 2: migrate -- add unique_together over ie_label.
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": WITH_CONSTRAINT}),
+            },
+            // 3: a duplicate insert must now be REJECTED on both drivers.
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({
+                    "sql": "INSERT INTO ie_widget (ie_label) VALUES ('dup-probe')"
+                }),
+            },
+            // 4: drop the constraint (destructive).
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": NO_CONSTRAINT, "allow_destructive": true}),
+            },
+            // 5: the same duplicate insert must now SUCCEED -- the drop
+            // actually lifted enforcement, not just the typedef record.
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({
+                    "sql": "INSERT INTO ie_widget (ie_label) VALUES ('dup-probe')"
+                }),
             },
         ],
         expected: ExpectedBehavior {
