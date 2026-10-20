@@ -1499,6 +1499,233 @@
       "action": "deferred",
       "reason": "deferred by review-close",
       "prd": "00183-split-oversized-modules-round-2-v1.md"
+    },
+    {
+      "type": "stall",
+      "site": "cap_regression",
+      "detail": "cap 2 reached with 5 unresolved HIGH findings, all classified as regressions introduced by this PRD's own rework: R1 c40ef4f, R2 784fce4, R3 784fce4, R4 784fce4, R5 34c5488",
+      "op_id": "9e10ac6d43d5",
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"
+    },
+    {
+      "cycle": 1,
+      "issue": "Spec violation: the apply path routes the new ops through new public raw-SQL grammar (`ALTER TABLE x ADD UNIQUE (...)` and `DROP UNIQUE (...)`). The PRD says PgWire has no SQL surface for this and that the constraint execution is internal. These statements are now intercepted by `try_custom_ddl`, so they are reachable from `ddb query`, GraphQL `executeSql` and PgWire. A raw `DROP UNIQUE` skips the `allow_destructive` gate that only `apply_schema` enforces. `docs/src/technical/sql-engine.md` and the CHANGELOG describe it only as apply output, not as user-callable SQL.",
+      "severity": "\ud83d\udfe0",
+      "file": "ddb-core/src/sql_engine/mod.rs:238",
+      "action": "deferred",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd0"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R1",
+      "issue": "[R1] Phase 2 acceptance is not met for REST: both index-evolution conformance fixtures run only Cli and Graphql, there is no REST driver and no REST test for unique_together evolution, while Transport Impact marks REST Guaranteed (tests/e2e/conformance/workflows.rs:349)",
+      "severity": "high",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd1"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R2",
+      "issue": "[R2] The add-unique duplicate check is skipped whenever any tuple column is genuinely new (live_probe_column returns None); the typedef is then committed to git before the unique index is built at commit-time rematerialize, so a failing rebuild leaves git declaring a constraint the index does not enforce, surfacing as a raw SQLite error rather than UNIQUE_VIOLATION (ddb-core/src/sql_engine/ddl/unique_ops.rs:86)",
+      "severity": "high",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd2"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R3",
+      "issue": "[R3] live_table_columns turns query failures into an empty column list and drops row errors with flatten(), so a failed PRAGMA makes every column look new and silently skips duplicate validation before the typedef is written; it must return and propagate a Result (ddb-core/src/sql_engine/ddl/unique_ops.rs:20)",
+      "severity": "high",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd3"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R4",
+      "issue": "[R4] A column absent from SQLite is not data-free: existing documents can already carry its frontmatter key, so adding that column plus uniqueness skips validation entirely and lets duplicates reach rematerialization after the git commit; effective document values must be validated pre-commit (ddb-core/src/sql_engine/ddl/unique_ops.rs:105)",
+      "severity": "high",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd4"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R5",
+      "issue": "[R5] Rename resolution checks live column names before replaying rename history, so a reused name probes the wrong data (b->c, then a->b, then ADD UNIQUE(b) checks original b instead of original a); renames must be replayed backwards chronologically, with a regression test (ddb-core/src/sql_engine/ddl/unique_ops.rs:53)",
+      "severity": "high",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd5"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R6",
+      "issue": "[R6] apply_unsupported_type_narrowing_combined_with_unique_rejects_atomically never reaches the unique preflight (it rejects on the unsupported TEXT->INTEGER conversion), so it passes against pre-change code; its 'renderer defect' comment is unsubstantiated given normalize_alter_column_type (ddb-core/src/service/schema_apply.rs:1470)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd6"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R7",
+      "issue": "[R7] apply_rename_with_unique_over_existing_duplicate_data_still_rejects asserts only SCHEMA_APPLY_PARTIAL, which a 'no such column' failure also produces, so it cannot tell duplicate rejection from an unrelated failure (ddb-core/src/service/schema_apply.rs:1548)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd7"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R8",
+      "issue": "[R8] live_table_columns swallows errors with unwrap_or_default() and rows.flatten(), silently skipping the duplicate check on a failed PRAGMA (ddb-core/src/sql_engine/ddl/unique_ops.rs:19)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd8"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R9",
+      "issue": "[R9] handle_add_unique_constraint is about 77 lines, over the 50-line limit; extract the duplicate probe into a count_duplicate_groups helper (ddb-core/src/sql_engine/ddl/unique_ops.rs:67)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd9"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R10",
+      "issue": "[R10] A duplicate-data failure on add surfaces as SCHEMA_APPLY_PARTIAL with UNIQUE_VIOLATION only folded into the message, and GraphQL redacts it to 'internal error'; the PRD asks for a structured error reusing the unique-violation path (ddb-core/src/service/schema_apply.rs:117)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd10"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R11",
+      "issue": "[R11] SchemaPlan is documented as sorting destructive ops after additive ones, but the partition moves only DropColumn; DropUniqueConstraint stays in emit order and works only because diff_unique_together runs after the drop-columns pass (ddb-core/src/schema_diff/differ.rs:34)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd11"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R12",
+      "issue": "[R12] The new error regressions can pass without exercising duplicate validation: the rename test accepts any SCHEMA_APPLY_PARTIAL and the type-change test accepts an earlier parser failure (ddb-core/src/service/schema_apply.rs:1208)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd12"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R13",
+      "issue": "[R13] Task 7 leaves empty-plan and warning outcomes unpinned: reapply checks only applied=false, GraphQL defaults missing fields and still discards warnings (tests/e2e/conformance/driver_graphql.rs:369)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd13"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R14",
+      "issue": "[R14] The new enforcement fixture duplicates both schema YAML constants from the migration fixture; move them to module scope so the workflows cannot drift (tests/e2e/conformance/workflows.rs:364)",
+      "severity": "medium",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd14"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R15",
+      "issue": "[R15] The new FFI test covers only create, add and enforce; there is no drop or reapply leg through DoogatDriver::apply_schema as the PRD asks (ddb-core/src/ffi/tests.rs:790)",
+      "severity": "low",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd15"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R16",
+      "issue": "[R16] The composite-skip comment wrongly claims an existing duplicate is caught by the UNIQUE INDEX at commit (a new column is NULL for all rows and SQLite permits NULL duplicates), and the comments carry '(task 6)'/'(task 8)' build markers (ddb-core/src/sql_engine/ddl/unique_ops.rs:86)",
+      "severity": "low",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd16"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R17",
+      "issue": "[R17] DropUniqueConstraint requires allow_destructive, which the PRD error-case text does not mention (ddb-core/src/schema_diff/plan.rs:174)",
+      "severity": "low",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd17"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R18",
+      "issue": "[R18] ddb.udl still defines ColumnDefRecord without zone, inconsistent with the proc-macro record even though the UDL is documentation-only (ddb-core/src/ddb.udl:62)",
+      "severity": "low",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd18"
+    },
+    {
+      "type": "cap-overflow",
+      "ref": "R19",
+      "issue": "[R19] 'Bindings regenerate clean' is unverified: no generated Swift or Kotlin artifact or smoke check for the new zone field exists in the tree",
+      "severity": "low",
+      "consensus": "1/3",
+      "reason": "rework cap reached with this finding unresolved",
+      "cycle": 2,
+      "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
+      "op_id": "9e10ac6d43d5-dd19"
     }
   ]
 }

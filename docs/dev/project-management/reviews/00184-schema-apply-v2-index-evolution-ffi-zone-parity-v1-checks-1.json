@@ -4,6 +4,7 @@
     "finding": "The mandatory fast gate failed: 2141 passed, one actor transaction test timed out. Reproduce with `cargo test -p ddb-server --lib actor::tests::shared_actor_preserves_schema_applys_owned_transaction -- --exact --nocapture`, resolve the timeout, then require a passing `cargo test-ci`; attribution to this diff remains unproven.",
     "file": "ddb-server/src/actor/tests/mod.rs:22",
     "command": "cargo test -p ddb-server --lib actor::tests::shared_actor_preserves_schema_applys_owned_transaction -- --exact --nocapture",
-    "source": "bob"
+    "source": "bob",
+    "result": {"exit": 0}
   }
 ]

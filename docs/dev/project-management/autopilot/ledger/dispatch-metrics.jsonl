@@ -652,3 +652,13 @@
 {"kind":"handoff","site":"build","edge":"resume","at":1792511417,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
 {"kind":"handoff","site":"review","edge":"resume","at":1792525714,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792525737,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792525769,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"id":"241d4895","kind":"bob","task":"review-00184-c2","queued_at":1792527702,"prompt_bytes":32361}
+{"id":"63d46edc","kind":"carl","task":"review-00184-c2","queued_at":1792527703,"prompt_bytes":25654}
+{"id":"824affbd","kind":"bob","task":"review-00184-c2","queued_at":1792528129,"prompt_bytes":32361}
+{"id":"44c8c62c","kind":"carl","task":"review-00184-c2","queued_at":1792528129,"prompt_bytes":25654}
+{"id":"241d4895","ended_at":1792528436,"elapsed_s":734,"outcome":"ok","detail":null}
+{"id":"63d46edc","ended_at":1792528440,"elapsed_s":737,"outcome":"error","detail":"retry: exit 1"}
+{"id":"824affbd","ended_at":1792528680,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"44c8c62c","ended_at":1792528680,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792528680,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
