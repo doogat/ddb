@@ -584,3 +584,13 @@
 {"kind":"handoff","site":"review","edge":"leave","at":1792459117,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792459148,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792474283,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792474998,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"id":"a31daccb","kind":"bob","task":"review-20261020c2","queued_at":1792480544,"prompt_bytes":25825}
+{"id":"5ce41f3b","kind":"carl","task":"review-20261020c2","queued_at":1792480544,"prompt_bytes":18852}
+{"id":"486cd62e","kind":"bob","task":"review-20261020c2","queued_at":1792485195,"prompt_bytes":25825}
+{"id":"a0718067","kind":"carl","task":"review-20261020c2","queued_at":1792485195,"prompt_bytes":18852}
+{"id":"486cd62e","ended_at":1792487276,"elapsed_s":2081,"outcome":"ok","detail":null}
+{"id":"a0718067","ended_at":1792487280,"elapsed_s":2085,"outcome":"error","detail":"exit 1"}
+{"id":"a31daccb","ended_at":1792487452,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"5ce41f3b","ended_at":1792487452,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792487452,"phase":"done","prd":"00183-split-oversized-modules-round-2-v1.md"}

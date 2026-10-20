@@ -54,5 +54,61 @@
     "issue": "`ddb-core/src/indexer/mod.rs` has 898 production lines (its `#[cfg(test)]` starts at line 899). That is over the cap and is not on the PRD list. The PRD said no unlisted file exceeded 800 at 8fe51c9, so it grew afterwards. This is out of scope, but a future sweep should pick it up.",
     "file": "ddb-core/src/indexer/mod.rs:899",
     "reason": "genuine and newly measured, but outside this PRD's enumerated split list, which was fixed at the 8fe51c9 measurement. Fixing it here would be scope creep against surgical-changes. Deferred to batch end so a round-3 sweep PRD picks it up with the rest of the regrown files."
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "🟡",
+    "issue": "Prior finding R7/R13 only partly fixed: stale single-file path comments remain. `ddb-core/src/service/validation.rs:137` still says `sql_engine/ddl.rs`, although the prior finding named it and only line 156 was updated. `ddb-core/src/sql_engine/ddl/alter.rs:368` still says `dml.rs`. `ddb-core/src/sql_engine/tests.rs:8237` and `:8412` still say `dml.rs`. Point each at the new path (`ddl/` modules, `dml/update.rs` or `dml/mod.rs`).",
+    "file": "ddb-core/src/service/validation.rs:137",
+    "reason": "single-voice"
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "🟡",
+    "issue": "`build_list_where_clause` and `build_aggregate_where_clause` duplicate the same deserialization, empty-filter fallback, validation, and error conversion. Replace them with one shared helper used by both resolvers; preserve the existing fallback behavior.",
+    "file": "ddb-server/src/schema/per_type_queries.rs:366",
+    "reason": "single-voice"
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "Docs still lag the new layout in a few places. `per_type_queries.rs` is new but absent from the `schema/` trees at `docs/src/technical/server.md:1101` and `docs/src/architecture/overview.md:190`, which list only `queries.rs`. `docs/src/technical/errors.md:14`, `:45` and `:86` still name `crdt_resolver.rs` and `sql_engine/dml.rs::handle_insert`. `docs/src/technical/invariants.md:85` still names `indexer/materialize.rs` and `ddb-server/src/filter.rs`. `docs/src/architecture/modules.md:78` says `repo_core.rs` holds the struct, but `GitRepo` is defined in `git_ops/mod.rs:96`.",
+    "file": "docs/src/technical/server.md:1101",
+    "reason": "single-voice"
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "Stale single-file path references remain in comments and docs after the doc-fix commits. `ddb-core/src/service/validation.rs:137` still says `sql_engine/ddl.rs`. `ddb-core/src/sql_engine/ddl/alter.rs:368`, `ddb-core/src/sql_engine/tests.rs:8237` and `:8412` still say `dml.rs`. `ddb-server/src/schema/mod.rs:433` and `:435` still cite `queries.rs:392`, which no longer holds that code. `docs/src/technical/errors.md:14`, `:45` and `:86`, `docs/src/technical/invariants.md:39` and `:85`, and `docs/src/technical/phase-2-exit.md:16`, `:18` and `:24` still name `crdt_resolver.rs`, `dml.rs`, `materialize.rs` or `filter.rs` as single files. The new `schema/per_type_queries.rs` appears in neither `docs/src/technical/server.md:1107` nor `docs/src/architecture/overview.md:196`. The docs acceptance (\"docs reflect the new module layout\") is largely met. `modules.md`, `overview.md`, `server.md`, `indexer.md` and `walkthrough.md` are updated, but not completely.",
+    "file": "docs/src/technical/errors.md:14",
+    "reason": "single-voice"
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "Several helpers extracted from `build_query_fields` still exceed 50 lines. Examples are `register_doogats_field` (`ddb-server/src/schema/queries.rs:91-153`), `register_search_field` and `register_per_type_list_field` (`ddb-server/src/schema/per_type_queries.rs:221-259`). They are mostly builder-chain and closure bodies, with no inline justification. The PRD requirement is only that the top-level builder be under 50 lines, and that holds: `build_query_fields` is `queries.rs:32-69`. Noted for the record.",
+    "file": "ddb-server/src/schema/queries.rs:91",
+    "reason": "single-voice"
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "The revised module table now places the `GitRepo` struct in `repo_core.rs`, although the split retains its definition in `git_ops/mod.rs`. Assign shared definitions to `mod.rs` and initialization/CRUD implementations to `repo_core.rs`.",
+    "file": "docs/src/architecture/modules.md:78",
+    "reason": "single-voice"
+  },
+  {
+    "cycle": 2,
+    "disposition": "discarded",
+    "severity": "⚪",
+    "issue": "The refreshed schema trees omit the newly added `per_type_queries.rs`. Add it beside `queries.rs` in both architecture/overview.md and technical/server.md, identifying its per-type registration responsibility.",
+    "file": "docs/src/architecture/overview.md:196",
+    "reason": "single-voice"
   }
 ]
