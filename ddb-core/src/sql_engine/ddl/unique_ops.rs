@@ -35,14 +35,16 @@ impl<'a> SqlEngine<'a> {
                 "unique constraint ({cols}) already present on {table_name}"
             )));
         }
-        let group_by = columns
+        let quoted: Vec<String> = columns.iter().map(|c| format!("\"{c}\"")).collect();
+        let group_by = quoted.join(", ");
+        let not_null = quoted
             .iter()
-            .map(|c| format!("\"{c}\""))
+            .map(|c| format!("{c} IS NOT NULL"))
             .collect::<Vec<_>>()
-            .join(", ");
+            .join(" AND ");
         let dup_count: i64 = self.index.sql_conn().query_row(
             &format!(
-                "SELECT COUNT(*) FROM (SELECT 1 FROM \"{table_name}\" GROUP BY {group_by} HAVING COUNT(*) > 1)"
+                "SELECT COUNT(*) FROM (SELECT 1 FROM \"{table_name}\" WHERE {not_null} GROUP BY {group_by} HAVING COUNT(*) > 1)"
             ),
             [],
             |row| row.get(0),
