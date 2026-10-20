@@ -2,6 +2,7 @@
 catchup: force
 default_model: opus
 model_tier_rationale: invented contract - new PlanOp variants and an FFI record field
+plan_expansion: allow
 ---
 catchup: force
 

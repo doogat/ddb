@@ -597,3 +597,19 @@
 {"kind":"handoff","site":"build","edge":"resume","at":1792487471,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
 {"kind":"handoff","site":"done","edge":"resume","at":1792487485,"phase":"done","prd":"00183-split-oversized-modules-round-2-v1.md"}
 {"kind":"handoff","site":"done","edge":"leave","at":1792487572,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792487600,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"id":"1cc924d2","kind":"tess","task":"1","queued_at":1792488912,"prompt_bytes":125114}
+{"id":"30f6c19b","kind":"tess","task":"1","queued_at":1792488956,"prompt_bytes":18314}
+{"id":"55951950","kind":"devon","task":"1","queued_at":1792489467,"prompt_bytes":4966}
+{"id":"5443c75b","kind":"ivan","task":"1","queued_at":1792489886,"prompt_bytes":39555}
+{"id":"55e42d11","kind":"deslop","task":"1","queued_at":1792491152,"prompt_bytes":4966}
+{"id":"ec50eb83","kind":"deslop","task":"1","queued_at":1792491180,"prompt_bytes":6416}
+{"id":"6425e036","kind":"pat","task":"1","queued_at":1792491382,"prompt_bytes":31478}
+{"id":"5443c75b","ended_at":1792491527,"elapsed_s":1249,"outcome":"ok","detail":"closed-by: commit 6ab95874a7bc359a589b0806ec67ce1db2a155ba"}
+{"id":"6425e036","ended_at":1792491527,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
+{"id":"1cc924d2","ended_at":1792491527,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"30f6c19b","ended_at":1792491527,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"55951950","ended_at":1792491527,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"55e42d11","ended_at":1792491527,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"ec50eb83","ended_at":1792491527,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792491527,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}

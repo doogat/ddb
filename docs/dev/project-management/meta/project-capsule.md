@@ -1,6 +1,6 @@
 # Project Capsule: Doogat DB
 
-Generated: 2026-10-19 (00183 task-3 resume; GitHub State, Active Work and Related context refreshed). Prior header: 2026-10-19 (00179 build entering). Older architecture and other-PRD entries retain their original verification scope.
+Generated: 2026-10-20 (00184 build entering; full catchup — GitHub State, Active Work and Related context refreshed). Prior header: 2026-10-19 (00183 task-3 resume). Older architecture and other-PRD entries retain their original verification scope.
 
 **Capsule pruned this session.** Prior version had grown to ~56K tokens via a chained "Prior header follows" history reaching back to 2026-05 plus 12 duplicate `## GitHub State` blocks and 3 duplicate `## Project Health` blocks. That history is not lost — every completed PRD's story lives in `dev/local/prds/done/`, its review trail in `dev/local/reviews/<prd>-audit.md`, and the cross-PRD narrative in the `project_*` memory files (see § Project Memories). This capsule now carries only current state; update it going forward instead of appending another header chain.
 
@@ -96,9 +96,10 @@ Generated: 2026-10-19 (00183 task-3 resume; GitHub State, Active Work and Relate
 - [!] **00182 where-filter-correctness-completeness-v2** (STALLED, moved to `hold/`; batch kept draining). Resume via `mv docs/dev/project-management/prds/hold/00182-where-filter-correctness-completeness-v2.md docs/dev/project-management/prds/backlog/`.
 - [x] **00183 split-oversized-modules-round-2-v1** (DONE 2026-10-20, in `done/`; 2 cycles, 13/13 tasks) — split `filter.rs`, `helpers.rs`, `queries.rs`, `dml.rs`, `ddl.rs`, `materialize.rs`, `schema/base_types.rs`, `indexer/graph.rs`, and `parser/mod.rs` into submodules under the 800-line cap. One deferred item: `ddb-core/src/indexer/mod.rs` grew to 898 production lines after the 8fe51c9 measurement, over the cap but not on this PRD's split list — out of scope here, flagged for a future round-3 sweep.
 
-### Remaining backlog (18 PRDs)
+- [ ] **00184 schema-apply-v2-index-evolution-ffi-zone-parity-v1** (IN PROGRESS, entering build gate 2026-10-20) — index/uniqueness evolution for existing types (`unique_together` diff/apply) + FFI `list_type_schemas` column zone parity.
 
-- [ ] 00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1
+### Remaining backlog (17 PRDs)
+
 - [ ] 00185-ddb-client-rust-crate-v1
 - [ ] 00186-offline-sdl-export-and-capability-handshake-v1
 - [ ] 00187-idempotent-upsert-return-existing-v1
@@ -126,15 +127,17 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 ## Related context
 
+2026-10-20 (00184 build entering, topic `schema apply v2 index evolution ffi zone parity`): engram reachable this run. Repo and portfolio scope return the same five rows, all self-hits inside the PRD's own file — no external prior art. Staleness stamp (`engram status --scope portfolio`, nonzero exit): memory 192 stale=24 dead=1, prd 9156 stale=0 dead=2961, discovery 531 stale=0 dead=50, transcripts 17713 stale=0 dead=17604, code 57589 stale=70 dead=21 (skipped=5900), findings 34368 clean, decision 25 stale=1.
+
 2026-10-19 (00183 task-3 resume, topic `split oversized modules round 2`): engram reachable this run. Repo and portfolio scope return the same five rows, all self-hits or adjacent prior art — `prds/wip/00183-…-v1.md:8-11` (0.032, the PRD's own capability line), `dev/local/reviews/00200-make-merge-tree-three-way-v1-review-01.md:73` (0.029, the G3 oversize finding that *created* this PRD: size violations were pre-existing, not introduced, and were handed to 00183), `prds/done/00156-split-oversized-core-modules-v1.md:1-2` (0.016, round 1 of this same sweep — the closest thing to a playbook). No external prior art. Review harvest upserted the `*-review-NN.md` files; the `*-audit.md` renders and the FT-/task-note files still fail to parse (`missing frontmatter`, `frontmatter must contain reviewers`) and are NOT harvested. Staleness stamp (`engram status --scope portfolio`, nonzero exit): memory 192 stale=24 dead=1, prd 9156 dead=2961, transcripts 17713 dead=17604, code 57515 stale=70 (skipped=5849), findings 34368 clean, decision 25 stale=1.
 
 2026-09-07: direct review/state artifacts establish the current 00171 context above. Catchup's task-restore helper returned `no_index`; no tasks were restored or rewritten. The optional engram query failed because the sandbox denied access to its embedding server at localhost:8083; harvest/index/portfolio retrieval were not continued. The older retrieval results below are historical and are not current evidence.
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-10-19, 00183 task-3 resume)
+## GitHub State (refreshed 2026-10-20, 00184 build entering)
 
-- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 428 unreleased commits on master.
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 481 unreleased commits on master. Test and Nightly both `in_progress` at catchup time; same `b159ae3c` failures as below still the latest completed red runs — nothing new since 2026-10-19.
 - **Nightly also RED (run `39226530581` at `b159ae3c`), but infrastructurally, not logically:** `integration_bundle_import_ref_namespace::bundle_import_retry_cleans_only_its_payload_namespace` panicked on a `git clone` that failed with `fatal: failed to copy file to 'repo/.git/objects/pack/pack-….rev': No such file or directory` — a runner filesystem failure during clone, no assertion fired. 612 passed / 1 failed / 2 ignored. Do not chase this as a product bug; re-check whether it recurs on the next Nightly.
 - The `cargo-deny` "Dependency policy" job is now the second hard failure in the Test workflow: four `error[vulnerability]` rows against `rustls` (Debug impls leak TLS secrets; buffered app data after ECH rejection; Brotli cert decompression allocating up to 1 GiB pre-auth; unauthenticated ServerHello downgrading later connections) plus `error[unmaintained]: unsafe-libyaml`. Dependency-side and untriaged — wants its own PRD, not a 00183 task.
 - **Test RED on master, latest run `39216349387` at `b159ae3c` (coverage job): `app_contract_error_t6::maps_internal_core_errors_to_internal_app_errors` fails — a sql-engine "unsupported operation" error now maps to `{SQL_ERROR, InvalidInput}` but the test still expects `{INTERNAL_ERROR, Internal}`.** This looks like unreviewed drift in the single error-mapping table (00173's domain) introduced somewhere in 00174-00178; not yet triaged into its own PRD. Unrelated to 00183's scope (pure-move module splits) — do not fix it under this PRD. Prior red runs also showed `cargo-deny` advisories (unmaintained `unsafe-libyaml` RUSTSEC-2024-0449, yanked `chacha20`/`spin`); still untriaged, candidate 00180 finding. Docs workflow green; Nightly `in_progress` at catchup time.

@@ -1,30 +1,23 @@
-# Assumptions ledger — 00183-split-oversized-modules-round-2-v1
+# Assumption ledger — 00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1
 
-## 1: Split filter.rs into filter/ submodules
+## Task 1: Diff unique_together deltas on existing types into AddUniqueConstraint/DropUniqueConstraint PlanOps
 
-Ivan:
-- `SchemaLookup` kept as `pub type` (its actual original visibility) rather than the dispatch text's stated `pub(crate) type`, since the task instructs preserving the exact prior public surface and the prior surface was `pub`.
-- `resolve_reference_target`, `resolve_reverse_target`, and `build_tags_filter_condition` widened from private to `pub(super)` (module-tree-internal only) — the minimum visibility needed for the split to compile; no wider than that.
-- Dropped the would-be `pub(crate) use reverse::{reverse_relations, ReverseRelation};` re-export from `mod.rs` since nothing in the crate consumes it at that path (confirmed via unused-import warning + clean rebuild after removal); the items remain `pub(crate)` and reachable within the `filter` module tree.
+Tess (initial):
+- DropUniqueConstraint renders exactly `ALTER TABLE "t" DROP UNIQUE ("c1", "c2")`, the spec's "DROP UNIQUE mirror" read literally.
+- Where a test compares op columns exactly, the fixture columns are already sorted, so an implementation that keeps the given order and one that sorts both pass. The column order the op carries is not pinned.
+- Comparison ignores the order of the constraints in the list as well as the column order inside each one (set-of-sets, pinned by `reordered_constraint_list_is_unchanged`).
+- Ordering of unique-constraint ops relative to other ops, or to DropColumn, is not pinned because the spec says nothing about it. (Superseded by the strengthen pass below, which did pin this.)
+- A new type (live `None`) still emits only `CreateType`, with no separate AddUniqueConstraint — the create path is existing behavior, unchanged.
+- `describe()` for Add and Drop must differ from each other; the spec only says it names the columns and table.
+- Did not test live `Some(vec![])` against desired `None` — the spec does not say whether they are equal.
 
-## 5: Sweep group B: split schema/base_types.rs, indexer/graph.rs, parser/mod.rs
+Tess (strengthen, after Devon):
+- Duplicate constraints count once (set-of-sets), on both the desired and live side. The design's prose says this, but its sample code does not do it.
+- Emitted ops carry each constraint's columns sorted, per the design's `normalize_constraints`; every expected op in the new tests uses column lists already in alphabetical order to avoid depending on this.
+- The add/drop relative order within a change (point 1 in Devon's list) checks membership and op count, not the order of the add and the drop — no dependency was pinned there.
+- `describe()` lists columns as they are stored in the op, joined by `", "`, per the design's `columns.join(", ")`.
 
-Ivan (base_types.rs):
-- The old flat file's `extract_body_section` re-export belongs in `to_gql.rs`, since it sits in that file's line range and `to_gql` calls it.
-- Unused re-exports may be dropped from `mod.rs` (8 names), because the only alternative is a lint-suppression attribute, which this repo's hooks block. `schema/mod.rs` declares `mod base_types;` privately and nothing imports those names, so no reachable path was lost.
-- `tests.rs` needs explicit imports, with a 4-space dedent allowed, since `use super::*` can no longer supply them from the new `mod.rs`.
-
-Ivan (graph.rs):
-- The new files import `Index` as `crate::indexer::Index` instead of through `super`, since `super::Index` no longer reaches it from inside `graph/`.
-- `StalenessRow` moved to `health.rs` because only the health methods use it.
-
-Ivan (parser/mod.rs):
-- Included the doc-comment lines immediately before the briefing's stated ranges (lines 9 and 641), since the briefing's line numbers were off by one.
-- Gated the test-only imports (`strip_wikilink`, `MAX_FRONTMATTER_BYTES`, `DoogatMeta`, `Value`) with `#[cfg(test)]` in `mod.rs`, because `tests.rs` is not this task's to edit and relies on `use super::*`.
-
-## 10: Update module docs for the new split module layout
-
-Ivan:
-- Read the bare "Write-through (materialize.rs)" heading as the `indexer/materialize/` directory, because `materialize_row` and the junction code live in `indexer/materialize/rows.rs` and `schema_helpers.rs`.
-- Described `crdt_resolver/mod.rs` as the entry point and trait impl, from the `resolve_conflicts` signature at line 27.
-- Described the other `crdt_resolver` files by filename (frontmatter, body, append_log, lww) without opening them.
+Ivan (implementor):
+- When a constraint is declared twice in different column orders, the op uses the first declaration's order; the tests only check the first-declared order.
+- When one type both drops and adds a constraint, the drop comes before the add; the tests check membership only, not this order.
+- Duplicate columns inside one constraint (e.g. `[day, day]`) are not reduced; no test covers that case.
