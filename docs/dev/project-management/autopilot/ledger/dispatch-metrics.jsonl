@@ -635,3 +635,5 @@
 {"id":"e08ca2e5","ended_at":1792495964,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792495964,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792495980,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792506924,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792506953,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
