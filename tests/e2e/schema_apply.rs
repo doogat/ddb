@@ -477,3 +477,76 @@ types:
         .assert()
         .failure();
 }
+
+#[test]
+fn unique_together_on_existing_duplicate_data_fails_clearly_via_cli() {
+    // PRD 00184 task 5: adding a `unique_together` to an EXISTING type whose
+    // live rows already violate it must surface a clear, non-zero CLI error
+    // (not a crash, not a silent success), and leave the constraint off the
+    // typedef -- a later diff still reports the add as pending.
+    let repo = DdbTestRepo::init();
+
+    let no_constraint = "\
+types:
+  - name: uniquedupwidget
+    columns:
+      - name: duplabel
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+";
+    let base_schema = write_schema(&repo, "uniquedupwidget_base", no_constraint);
+    repo.ddb()
+        .args(["schema", "apply", &base_schema])
+        .assert()
+        .success();
+
+    // Two rows sharing the same `duplabel` value -- a duplicate group.
+    repo.ddb()
+        .args([
+            "query",
+            "INSERT INTO uniquedupwidget (duplabel) VALUES ('dup')",
+        ])
+        .assert()
+        .success();
+    repo.ddb()
+        .args([
+            "query",
+            "INSERT INTO uniquedupwidget (duplabel) VALUES ('dup')",
+        ])
+        .assert()
+        .success();
+
+    let with_constraint = "\
+types:
+  - name: uniquedupwidget
+    columns:
+      - name: duplabel
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+    unique_together: [[duplabel]]
+";
+    let constrained_schema = write_schema(&repo, "uniquedupwidget_constrained", with_constraint);
+
+    repo.ddb()
+        .args(["schema", "apply", &constrained_schema])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate"));
+
+    // The constraint did not land: a diff still reports it as pending work,
+    // not an already-converged no-op.
+    repo.ddb()
+        .args(["schema", "diff", &constrained_schema])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("add_unique_constraint"));
+
+    // No mutation to the data either: both duplicate rows are still there.
+    repo.ddb()
+        .args(["query", "SELECT duplabel FROM uniquedupwidget WHERE duplabel = 'dup'"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dup"));
+}

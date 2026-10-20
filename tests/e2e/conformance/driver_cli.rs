@@ -5,7 +5,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::common::{ddb_bin, DdbTestRepo};
-use super::args::{optional_string, optional_string_list, optional_string_map, require_string};
+use super::args::{
+    optional_bool, optional_string, optional_string_list, optional_string_map, require_string,
+};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
 
@@ -34,7 +36,7 @@ impl CliDriver {
     }
 
     fn run_step(&self, step: &Step, timeout: Duration) -> ConformanceResult {
-        let args = match build_args(step) {
+        let args = match build_args(step, self.repo.path()) {
             Ok(args) => args,
             Err(missing) => {
                 return ConformanceResult::SetupFailed {
@@ -72,9 +74,10 @@ impl CliDriver {
             StepOp::CreateDoogat | StepOp::ReadDoogat | StepOp::ListDoogats | StepOp::Search => {
                 ConformanceValue::String(stdout)
             }
-            StepOp::UpdateDoogat | StepOp::DeleteDoogat | StepOp::ExecuteSql => {
-                ConformanceValue::Null
-            }
+            StepOp::UpdateDoogat
+            | StepOp::DeleteDoogat
+            | StepOp::ExecuteSql
+            | StepOp::SchemaApply => ConformanceValue::Null,
         };
 
         ConformanceResult::Ok {
@@ -90,7 +93,7 @@ impl Default for CliDriver {
     }
 }
 
-fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
+fn build_args(step: &Step, repo_path: &std::path::Path) -> Result<Vec<String>, &'static str> {
     match step.op {
         StepOp::CreateDoogat => {
             let title = require_string(&step.args, "title")?;
@@ -141,6 +144,23 @@ fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
         StepOp::ExecuteSql => {
             let sql = require_string(&step.args, "sql")?;
             Ok(vec!["query".into(), sql])
+        }
+        StepOp::SchemaApply => {
+            let schema = require_string(&step.args, "schema")?;
+            let path = repo_path.join("conformance_schema_apply.yaml");
+            std::fs::write(&path, schema).map_err(|_| "schema")?;
+            let mut args = vec![
+                "schema".into(),
+                "apply".into(),
+                path.to_string_lossy().into_owned(),
+            ];
+            if optional_bool(&step.args, "dry_run") {
+                args.push("--dry-run".into());
+            }
+            if optional_bool(&step.args, "allow_destructive") {
+                args.push("--allow-destructive".into());
+            }
+            Ok(args)
         }
     }
 }

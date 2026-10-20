@@ -280,6 +280,68 @@ pub fn warnings_shape_contract() -> WorkflowFixture {
     }
 }
 
+/// PRD 00184: index-evolution apply workflow (REST deferred per the PRD's own
+/// Transport Impact note until driver 00175 lands; FFI is pinned separately
+/// by the `ddb-core` unit test from task 4).
+///
+/// CREATE a type with no `unique_together`, apply a desired schema adding
+/// one (the migration must be reported, not a `SCHEMA_UNSUPPORTED_CHANGE`),
+/// then re-apply the identical desired schema and assert convergence to a
+/// no-op. Both steps run through the shared CRUD driver surface (CLI's
+/// `schema apply` / GraphQL's `applySchema` mutation) via the new
+/// `StepOp::SchemaApply`, exercised on both drivers by the same fixture per
+/// the repo's one-fixture-many-drivers pattern.
+pub fn index_evolution_migration() -> WorkflowFixture {
+    const NO_CONSTRAINT: &str = "\
+types:
+  - name: ie_widget
+    columns:
+      - name: ie_label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+";
+    const WITH_CONSTRAINT: &str = "\
+types:
+  - name: ie_widget
+    columns:
+      - name: ie_label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+    unique_together: [[ie_label]]
+";
+    WorkflowFixture {
+        id: "index_evolution_migration".into(),
+        title: "Adding unique_together to an existing type migrates, re-apply converges".into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        steps: vec![
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": NO_CONSTRAINT}),
+            },
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": WITH_CONSTRAINT}),
+            },
+            Step {
+                op: StepOp::SchemaApply,
+                args: serde_json::json!({"schema": WITH_CONSTRAINT}),
+            },
+        ],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![],
+            error: None,
+        },
+        interfaces: vec![InterfaceId::Cli, InterfaceId::Graphql],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::fixture::*;

@@ -1,6 +1,7 @@
 pub mod args;
 pub mod comparator;
 pub mod cross_driver_crud;
+pub mod cross_driver_schema_apply;
 pub mod cross_driver_validation;
 pub mod driver_cli;
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::super::common::{DdbTestRepo, ServerGuard};
-use super::args::{optional_string, optional_string_list, require_string};
+use super::args::{optional_bool, optional_string, optional_string_list, require_string};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
 
@@ -100,6 +100,7 @@ impl GraphqlDriver {
             StepOp::ListDoogats => self.run_list(timeout),
             StepOp::Search => self.run_search(&step.args, timeout),
             StepOp::ExecuteSql => self.run_execute_sql(&step.args, timeout),
+            StepOp::SchemaApply => self.run_schema_apply(&step.args, timeout),
         }
     }
 
@@ -331,6 +332,38 @@ impl GraphqlDriver {
         };
         ConformanceResult::Ok {
             value,
+            warnings: vec![],
+        }
+    }
+
+    fn run_schema_apply(&self, args: &serde_json::Value, timeout: Duration) -> ConformanceResult {
+        let schema = match require_string(args, "schema") {
+            Ok(v) => v,
+            Err(field) => return setup_failed_missing(field),
+        };
+        let dry_run = optional_bool(args, "dry_run");
+        let allow_destructive = optional_bool(args, "allow_destructive");
+        let result = match self.post_graphql(
+            serde_json::json!({
+                "query": r#"mutation($schema: String!, $dryRun: Boolean, $allowDestructive: Boolean) {
+                    applySchema(schema: $schema, dryRun: $dryRun, allowDestructive: $allowDestructive) { applied }
+                }"#,
+                "variables": {
+                    "schema": schema,
+                    "dryRun": dry_run,
+                    "allowDestructive": allow_destructive,
+                },
+            }),
+            timeout,
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
+        if let Some(errors) = non_empty_errors(&result) {
+            return graphql_err(&errors[0]);
+        }
+        ConformanceResult::Ok {
+            value: ConformanceValue::Null,
             warnings: vec![],
         }
     }

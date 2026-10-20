@@ -216,7 +216,7 @@ Returns `SqlResultRecord`:
 
 `TypeSchemaRecord` contains:
 - `table_name` — the type name
-- `columns: Vec<ColumnDefRecord>` — each with `name`, `data_type`, optional `references`, `required` flag
+- `columns: Vec<ColumnDefRecord>` — each with `name`, `data_type`, optional `references`, `required` flag, and `zone` (`Option<String>`: `"frontmatter"`, `"body"`, `"reference"`, or `None` for an undeclared zone — matches the GraphQL introspection value exactly, including the `None`/null case; never defaulted)
 - `crdt_strategy` — optional CRDT merge strategy
 - `template_sections` — section names from the typedef template
 
@@ -296,7 +296,7 @@ after a poisoned lock, never a Rust panic.
 - `AttachmentInfo` — `{ name, mime, size, path }` (mirrors `types::AttachmentInfo`)
 - `SqlResultRecord` — `{ columns, rows, affected_rows, message }` (flat conversion from `SqlResult` enum)
 - `TypeSchemaRecord` — `{ table_name, columns, crdt_strategy, template_sections }`
-- `ColumnDefRecord` — `{ name, data_type, references, required }`
+- `ColumnDefRecord` — `{ name, data_type, references, required, zone }` (`zone: Option<String>`, additive — PRD 00184)
 - `DdbErrorContextEntry` — `{ key, value: Option<String>, values }` (structured-error context attached to the `Validation` / `Conflict` variants)
 
 ## Compatibility and Deprecation

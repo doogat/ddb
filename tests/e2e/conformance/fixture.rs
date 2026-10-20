@@ -69,6 +69,13 @@ pub enum StepOp {
     /// Args: `sql` (required). Runs a SQL statement (e.g. `CREATE TABLE` to
     /// register a typedef before typed creates). Result value is `Null`.
     ExecuteSql,
+    /// Args: `schema` (required, a desired-schema YAML doc string), optional
+    /// `dry_run` and `allow_destructive` booleans (default `false`). Result
+    /// value is `Null` on success; a plan with ops but `applied: false`
+    /// (a no-op re-apply) is indistinguishable from one that actually applied
+    /// at this variant-level comparison -- fixtures assert via a follow-up
+    /// `ExecuteSql`/`ReadDoogat`-shaped probe, not this step's own value.
+    SchemaApply,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn step_op_variants_are_seven_and_distinct() {
+    fn step_op_variants_are_eight_and_distinct() {
         let variants: Vec<StepOp> = vec![
             StepOp::CreateDoogat,
             StepOp::ReadDoogat,
@@ -203,8 +210,9 @@ mod tests {
             StepOp::ListDoogats,
             StepOp::Search,
             StepOp::ExecuteSql,
+            StepOp::SchemaApply,
         ];
-        assert_eq!(variants.len(), 7);
+        assert_eq!(variants.len(), 8);
         for i in 0..variants.len() - 1 {
             assert_ne!(variants[i], variants[i + 1]);
         }

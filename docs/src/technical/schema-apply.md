@@ -54,6 +54,8 @@ per change. Plan op kinds:
 | `set_singleton` | `singleton` flag differs | `ALTER TABLE ... SET SINGLETON` (or `DROP SINGLETON`) |
 | `rename_column` | explicit `rename_from` directive | `ALTER TABLE ... RENAME COLUMN ...` (destructive) |
 | `drop_column` | column in live, not desired | `ALTER TABLE ... DROP COLUMN ...` (destructive) |
+| `add_unique_constraint` | a `unique_together` constraint in desired, not live | `ALTER TABLE ... ADD UNIQUE (...)` |
+| `drop_unique_constraint` | a `unique_together` constraint in live, not desired | `ALTER TABLE ... DROP UNIQUE (...)` (destructive) |
 
 Ops apply in a safe order: per-type create, add, alter, zone, search-key, and singleton
 changes first, then every rename, then every drop last.
@@ -105,16 +107,23 @@ Some desired-vs-live differences have no targeted ALTER DDL. The differ still de
 and returns each as a warning with code `SCHEMA_UNSUPPORTED_CHANGE`; they are never
 silently ignored. Unsupported changes include per-column `required`, `default_value`,
 `references`, `allowed_values`, `on_delete`, and `search_boost`, and per-type
-`unique_together`, `title_template`, `folder`, `crdt_strategy`, `template_sections`, and
-`stale_after_days`.
+`title_template`, `folder`, `crdt_strategy`, `template_sections`, and `stale_after_days`.
+`unique_together` on an existing type is **not** in this list — see below.
 
 ### What "index" means here
 
 Doogat DB has no general secondary indexes to declare. Full-text search is automatic
 (FTS5 over every doogat). The one declarable index-like constraint is `unique_together`,
-which creates SQLite unique indexes at materialization. `unique_together` is only settable
-at `CREATE TABLE`, so a change to it on an existing type is reported as an unsupported
-change rather than applied.
+which creates SQLite unique indexes at materialization. A `unique_together` change on an
+EXISTING type is applied like any other op: the differ emits `add_unique_constraint` or
+`drop_unique_constraint` (a set-of-sets diff, order-independent per constraint), and the
+engine runs it through the same atomic apply as every other op. Dropping a constraint is
+destructive and gated by `--allow-destructive`; adding one is not. Adding a constraint
+over existing duplicate rows fails before any typedef write with a structured
+`UNIQUE_VIOLATION`-class error (surfaced as `SCHEMA_APPLY_PARTIAL` at the `apply_schema`
+boundary — see the error table below), so the typedef is never left out of sync with the
+materialized table. Re-applying a converged `unique_together` doc is an idempotent no-op,
+same as every other op kind.
 
 ## Error and warning codes
 

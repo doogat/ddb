@@ -60,6 +60,13 @@ pub fn optional_string_map(
     }
 }
 
+/// Pull an optional bool field out of a step's JSON args, defaulting to
+/// `false` when absent or not a bool (mirrors the server's own `applySchema`
+/// resolver default for `dryRun`/`allowDestructive`).
+pub fn optional_bool(args: &serde_json::Value, name: &str) -> bool {
+    args.get(name).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +149,13 @@ mod tests {
             optional_string_map(&json!({"fields": {"n": 1}}), "fields"),
             Err("fields")
         );
+    }
+
+    #[test]
+    fn optional_bool_returns_value_or_false_default() {
+        assert!(optional_bool(&json!({"dry_run": true}), "dry_run"));
+        assert!(!optional_bool(&json!({"dry_run": false}), "dry_run"));
+        assert!(!optional_bool(&json!({}), "dry_run"));
+        assert!(!optional_bool(&json!({"dry_run": "yes"}), "dry_run"));
     }
 }
