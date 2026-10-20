@@ -662,3 +662,5 @@
 {"id":"824affbd","ended_at":1792528680,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"id":"44c8c62c","ended_at":1792528680,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792528680,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792531251,"phase":"build","prd":"00185-ddb-client-rust-crate-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792532363,"phase":"build","prd":"00185-ddb-client-rust-crate-v1.md"}

@@ -1726,6 +1726,13 @@
       "cycle": 2,
       "prd": "00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md",
       "op_id": "9e10ac6d43d5-dd19"
+    },
+    {
+      "type": "stall",
+      "site": "plan_expansion",
+      "detail": "module_drift; note docs/dev/project-management/autopilot/split-notes/00185-ddb-client-rust-crate-v1.md",
+      "op_id": "f2109ccceb36",
+      "prd": "00185-ddb-client-rust-crate-v1.md"
     }
   ]
 }
