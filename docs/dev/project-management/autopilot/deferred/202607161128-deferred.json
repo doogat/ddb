@@ -1489,6 +1489,16 @@
       "reason": "outside this PRD's fixed split list; fixing it here would be scope creep against surgical-changes",
       "file": "ddb-core/src/indexer/mod.rs:899",
       "prd": "00183-split-oversized-modules-round-2-v1.md"
+    },
+    {
+      "type": "deferred_decision",
+      "cycle": 1,
+      "issue": "`ddb-core/src/indexer/mod.rs` has 898 production lines (its `#[cfg(test)]` starts at line 899). That is over the 800-line cap and is not on this PRD's split list, so it grew after the 8fe51c9 measurement. Out of scope here; a future round-3 sweep should pick it up.",
+      "severity": "\u26aa",
+      "file": "ddb-core/src/indexer/mod.rs:899",
+      "action": "deferred",
+      "reason": "deferred by review-close",
+      "prd": "00183-split-oversized-modules-round-2-v1.md"
     }
   ]
 }
