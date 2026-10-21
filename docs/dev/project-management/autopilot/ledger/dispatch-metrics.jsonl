@@ -686,3 +686,25 @@
 {"id":"d965ded5","kind":"tess","task":"2","queued_at":1792560813,"prompt_bytes":5645}
 {"id":"d965ded5","ended_at":1792561713,"elapsed_s":900,"outcome":"ok","detail":null}
 {"id":"116bd587","kind":"ivan","task":"2","queued_at":1792561759,"prompt_bytes":36833}
+{"id":"6d05dd08","ended_at":1792562663,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"id":"56ef00cd","ended_at":1792562663,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"id":"326a91dc","ended_at":1792562663,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"id":"116bd587","ended_at":1792562663,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792562663,"phase":"build","prd":"00186-offline-sdl-export-and-capability-handshake-v1.md"}
+{"id":"1f0180ad","kind":"deslop","task":"2","queued_at":1792564022,"prompt_bytes":5014}
+{"id":"1f0180ad","ended_at":1792564043,"elapsed_s":21,"outcome":"ok","detail":null}
+{"id":"3e2c0192","kind":"pat","task":"2","queued_at":1792564085,"prompt_bytes":35165}
+{"id":"6b52a772","kind":"tess","task":"3","queued_at":1792564216,"prompt_bytes":37024}
+{"id":"5236b6b3","kind":"devon","task":"3","queued_at":1792565142,"prompt_bytes":4835}
+{"id":"5236b6b3","ended_at":1792565244,"elapsed_s":102,"outcome":"ok","detail":null}
+{"id":"e3183203","kind":"tess","task":"3","queued_at":1792565263,"prompt_bytes":3470}
+{"id":"e3183203","ended_at":1792565364,"elapsed_s":101,"outcome":"ok","detail":null}
+{"id":"fbfd7b8e","kind":"ivan","task":"3","queued_at":1792565390,"prompt_bytes":28482}
+{"id":"a3786301","kind":"deslop","task":"3","queued_at":1792567143,"prompt_bytes":4991}
+{"id":"a3786301","ended_at":1792567158,"elapsed_s":15,"outcome":"ok","detail":null}
+{"id":"610ab0f5","kind":"pat","task":"3","queued_at":1792567187,"prompt_bytes":20711}
+{"id":"3e2c0192","ended_at":1792567305,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"6b52a772","ended_at":1792567305,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"fbfd7b8e","ended_at":1792567305,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"610ab0f5","ended_at":1792567305,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792567305,"phase":"build","prd":"00186-offline-sdl-export-and-capability-handshake-v1.md"}
