@@ -87,4 +87,106 @@ async fn capabilities_query_rejects_unknown_subfield() {
         !response.errors.is_empty(),
         "querying a non-existent `enabled` subfield must surface a GraphQL error"
     );
+    // Bind to intent: the type is named `Capabilities` and exposes exactly
+    // `version` and `flags`, nothing more.
+    let data = run_query(r#"{ __type(name: "Capabilities") { fields { name } } }"#).await;
+    let mut names: Vec<&str> = data["__type"]["fields"]
+        .as_array()
+        .unwrap_or_else(|| panic!("type `Capabilities` must exist; got: {data}"))
+        .iter()
+        .filter_map(|f| f["name"].as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["flags", "version"], "got: {data}");
+}
+
+/// Unwrap a `__Type` JSON node, asserting it is NON_NULL, and return its inner type.
+fn expect_non_null<'a>(ty: &'a serde_json::Value, what: &str) -> &'a serde_json::Value {
+    assert_eq!(ty["kind"].as_str(), Some("NON_NULL"), "{what} must be non-null; got: {ty}");
+    &ty["ofType"]
+}
+
+#[tokio::test]
+async fn capabilities_types_are_non_null_string_and_string_list() {
+    let data = run_query(
+        r#"{
+            query: __type(name: "Query") { fields { name type { ...T } } }
+            caps: __type(name: "Capabilities") { fields { name type { ...T } } }
+        }
+        fragment T on __Type {
+            kind name ofType { kind name ofType { kind name ofType { kind name } } }
+        }"#,
+    )
+    .await;
+    let field_type = |obj: &str, field: &str| -> serde_json::Value {
+        data[obj]["fields"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{obj} fields missing; got: {data}"))
+            .iter()
+            .find(|f| f["name"] == field)
+            .unwrap_or_else(|| panic!("{obj}.{field} missing; got: {data}"))["type"]
+            .clone()
+    };
+
+    let cap_field = field_type("query", "capabilities");
+    let inner = expect_non_null(&cap_field, "Query.capabilities");
+    assert_eq!(inner["kind"], "OBJECT", "got: {cap_field}");
+    assert_eq!(inner["name"], "Capabilities", "got: {cap_field}");
+
+    let version = field_type("caps", "version");
+    let inner = expect_non_null(&version, "Capabilities.version");
+    assert_eq!(inner["name"], "String", "got: {version}");
+
+    let flags = field_type("caps", "flags");
+    let list = expect_non_null(&flags, "Capabilities.flags");
+    assert_eq!(list["kind"], "LIST", "got: {flags}");
+    let item = expect_non_null(&list["ofType"], "Capabilities.flags items");
+    assert_eq!(item["name"], "String", "got: {flags}");
+}
+
+/// Concatenated source of every `.rs` file under `src/schema/`.
+fn schema_sources() -> String {
+    fn walk(dir: &std::path::Path, out: &mut String) {
+        for entry in std::fs::read_dir(dir).expect("read schema dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push_str(&std::fs::read_to_string(&path).expect("read source"));
+            }
+        }
+    }
+    let mut out = String::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/schema"),
+        &mut out,
+    );
+    out
+}
+
+#[test]
+fn capabilities_resolver_derives_from_capabilities_module() {
+    // The version and flag list must come from the single source of truth,
+    // not literals that happen to match today's Cargo version and FLAGS.
+    let src = schema_sources();
+    assert!(
+        src.contains("capabilities::version()"),
+        "the GraphQL resolver must call capabilities::version()"
+    );
+    assert!(
+        src.contains("capabilities::capabilities()"),
+        "the GraphQL resolver must call capabilities::capabilities()"
+    );
+    let version_literal = format!("\"{}\"", ddb_server::capabilities::version());
+    assert!(
+        !src.contains(&version_literal),
+        "schema code must not hardcode the version literal {version_literal}"
+    );
+    for flag in ddb_server::capabilities::FLAGS {
+        let literal = format!("\"{flag}\"");
+        assert!(
+            !src.contains(&literal),
+            "schema code must not hand-copy flag literal {literal}"
+        );
+    }
 }
