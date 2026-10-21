@@ -72,6 +72,7 @@ mod relation_resolution;
 mod rename;
 mod rest;
 mod schema_apply;
+mod schema_sdl;
 mod search_in_filter;
 mod search_junction_filter;
 mod search_links;
