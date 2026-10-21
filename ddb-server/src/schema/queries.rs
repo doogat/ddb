@@ -41,9 +41,10 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
     query = register_schema_version_field(query);
     query = register_checkbox_items_field(query);
     query = register_open_actions_field(query);
+    query = register_capabilities_field(query);
 
     let mut known_types: HashMap<String, String> = HashMap::new();
-    let mut dynamic_types: Vec<Object> = Vec::new();
+    let mut dynamic_types: Vec<Object> = vec![capabilities_type()];
     let mut dynamic_inputs: Vec<InputObject> = Vec::new();
     let (mut query, sequence_node_type, sequence_info_type, broken_sequence_type) =
         super::per_type_queries::register_dynamic_type_fields(
@@ -442,6 +443,51 @@ fn register_open_actions_field(query: Object) -> Object {
         .description(
             "Shorthand for checkboxItems(state: \"open\"). Returns uncompleted action items.",
         ),
+    )
+}
+
+// Capabilities { version, flags }
+fn capabilities_type() -> Object {
+    Object::new("Capabilities")
+        .field(
+            Field::new("version", TypeRef::named_nn(TypeRef::STRING), |_| {
+                FieldFuture::new(async move {
+                    Ok(Some(FieldValue::value(GqlValue::from(
+                        crate::capabilities::version(),
+                    ))))
+                })
+            })
+            .description("Server version."),
+        )
+        .field(
+            Field::new(
+                "flags",
+                TypeRef::named_nn_list_nn(TypeRef::STRING),
+                |_| {
+                    FieldFuture::new(async move {
+                        Ok(Some(FieldValue::value(GqlValue::List(
+                            crate::capabilities::capabilities()
+                                .iter()
+                                .map(|f| GqlValue::from(f.to_string()))
+                                .collect(),
+                        ))))
+                    })
+                },
+            )
+            .description("Supported capability flag names, in stable order."),
+        )
+        .description("Server version and supported capability flags.")
+}
+
+// capabilities
+fn register_capabilities_field(query: Object) -> Object {
+    query.field(
+        Field::new("capabilities", TypeRef::named_nn("Capabilities"), |_| {
+            FieldFuture::new(async move {
+                Ok(Some(FieldValue::value(GqlValue::Object(IndexMap::new()))))
+            })
+        })
+        .description("Server version and capability flags for client handshake."),
     )
 }
 

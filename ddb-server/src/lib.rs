@@ -250,6 +250,7 @@ async fn health_ready(
         "version": env!("CARGO_PKG_VERSION"),
         "uptime_seconds": start.0.elapsed().as_secs(),
         "index_reachable": index_reachable,
+        "capabilities": crate::capabilities::capabilities(),
     });
 
     (code, axum::Json(body)).into_response()
@@ -263,4 +264,47 @@ async fn health_live() -> axum::response::Response {
         axum::Json(serde_json::json!({"status": "ok"})),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod health_ready_tests {
+    use super::*;
+    use crate::events::EventBus;
+
+    #[tokio::test]
+    async fn health_ready_body_lists_capabilities_and_keeps_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        ddb_core::service::DoogatService::init(tmp.path()).expect("init repo");
+        let actor = ActorHandle::spawn(
+            tmp.path().to_path_buf(),
+            EventBus::new(),
+            ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT,
+        )
+        .expect("spawn actor");
+
+        let response = health_ready(
+            Extension(actor),
+            Extension(StartTime(Instant::now())),
+        )
+        .await;
+
+        use axum::response::IntoResponse;
+        let body = axum::body::to_bytes(response.into_response().into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            json["version"].as_str(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "version key must be unchanged; got: {json}"
+        );
+        let caps: Vec<String> = json["capabilities"]
+            .as_array()
+            .unwrap_or_else(|| panic!("capabilities must be a JSON array; got: {json}"))
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(caps, crate::capabilities::capabilities());
+    }
 }
