@@ -669,3 +669,20 @@
 {"id":"a431e933","kind":"devon","task":"1","queued_at":1792533703,"prompt_bytes":5817}
 {"id":"a431e933","ended_at":1792534602,"elapsed_s":899,"outcome":"ok","detail":null}
 {"id":"39cd754b","kind":"ivan","task":"1","queued_at":1792534777,"prompt_bytes":14870}
+{"id":"65f045d4","ended_at":1792535487,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"id":"39cd754b","ended_at":1792535487,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792535487,"phase":"build","prd":"00186-offline-sdl-export-and-capability-handshake-v1.md"}
+{"id":"7f1f2465","kind":"pat","task":"1","queued_at":1792536508,"prompt_bytes":8237}
+{"id":"7f1f2465","ended_at":1792536535,"elapsed_s":27,"outcome":"ok","detail":null}
+{"id":"6d05dd08","kind":"tess","task":"2","queued_at":1792536644,"prompt_bytes":95751}
+{"id":"56ef00cd","kind":"tess","task":"2","queued_at":1792536651,"prompt_bytes":59704}
+{"id":"326a91dc","kind":"tess","task":"2","queued_at":1792536666,"prompt_bytes":40689}
+{"id":"29124570","kind":"tess","task":"2","queued_at":1792536675,"prompt_bytes":40689}
+{"id":"29124570","ended_at":1792545807,"elapsed_s":9132,"outcome":"ok","detail":null}
+{"id":"0c9b0658","kind":"devon","task":"2","queued_at":1792545851,"prompt_bytes":3747}
+{"id":"0c9b0658","ended_at":1792559405,"elapsed_s":13554,"outcome":"lost","detail":null}
+{"id":"12556f78","kind":"devon","task":"2","queued_at":1792559409,"prompt_bytes":3747}
+{"id":"12556f78","ended_at":1792560783,"elapsed_s":1374,"outcome":"ok","detail":null}
+{"id":"d965ded5","kind":"tess","task":"2","queued_at":1792560813,"prompt_bytes":5645}
+{"id":"d965ded5","ended_at":1792561713,"elapsed_s":900,"outcome":"ok","detail":null}
+{"id":"116bd587","kind":"ivan","task":"2","queued_at":1792561759,"prompt_bytes":36833}
