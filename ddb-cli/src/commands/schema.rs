@@ -13,6 +13,18 @@ pub(crate) fn schema(repo: &std::path::Path, action: SchemaAction) -> ddb_core::
             dry_run,
             allow_destructive,
         } => (file, dry_run, allow_destructive),
+        SchemaAction::Sdl { out } => {
+            let repo_path = std::fs::canonicalize(repo)?;
+            let rt = tokio::runtime::Runtime::new().map_err(ddb_core::error::DoogatError::Io)?;
+            let sdl = rt
+                .block_on(ddb_server::schema::render_sdl(repo_path))
+                .map_err(ddb_core::error::DoogatError::Validation)?;
+            match out {
+                Some(path) => std::fs::write(path, sdl)?,
+                None => outln!("{sdl}")?,
+            }
+            return Ok(());
+        }
     };
 
     let schema_doc = std::fs::read_to_string(&file)?;

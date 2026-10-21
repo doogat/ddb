@@ -96,6 +96,30 @@ pub fn build_schema(
         .map_err(|e| e.to_string())
 }
 
+/// Render the GraphQL SDL for the repo at `repo_path` without serving it:
+/// builds the same schema the live server builds and binds no listener.
+pub async fn render_sdl(repo_path: std::path::PathBuf) -> Result<String, String> {
+    use crate::events::EventBus;
+    use ddb_core::service::DoogatService;
+
+    let type_schemas = DoogatService::open(&repo_path)
+        .map_err(|e| e.to_string())?
+        .list_type_schemas()
+        .map_err(|e| e.to_string())?;
+
+    let event_bus = EventBus::new();
+    let actor = ActorHandle::spawn(
+        repo_path.clone(),
+        event_bus,
+        ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT,
+    )
+    .map_err(|e| e.to_string())?;
+    let read_pool = ReadPool::new(repo_path, 1).map_err(|e| e.to_string())?;
+
+    let schema = build_schema(actor, read_pool, type_schemas, None)?;
+    Ok(schema.sdl())
+}
+
 /// Register core type definitions and shared filter types onto the schema builder.
 fn register_shared_types(builder: SchemaBuilder, td: type_defs::TypeDefs) -> SchemaBuilder {
     builder

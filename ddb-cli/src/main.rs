@@ -503,6 +503,11 @@ pub(crate) enum SchemaAction {
     },
     /// Alias for `apply --dry-run`.
     Diff { file: String },
+    /// Print the GraphQL SDL the server would serve for this repo, without serving it.
+    Sdl {
+        #[arg(long)]
+        out: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
